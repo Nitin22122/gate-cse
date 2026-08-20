@@ -18,6 +18,7 @@ export type StudySession = {
   scheduled_date: string;
   duration_minutes: number;
   tag: string;
+  topics: string | null;
   completed: boolean;
   position: number;
 };
@@ -51,6 +52,11 @@ export type Profile = {
   display_name: string | null;
   exam_date: string;
   prep_start_date: string;
+  username: string | null;
+  stream: string;
+  target_branch: string;
+  about_me: string | null;
+  social_links: string | null;
 };
 
 export const SESSION_TAGS = [
@@ -211,4 +217,106 @@ export function formatHours(minutes: number) {
   if (h && m) return `${h}h ${m}m`;
   if (h) return `${h}h`;
   return `${m}m`;
+}
+
+export type TestRecord = {
+  id: string;
+  name: string;
+  organization: string;
+  test_type: string;
+  category: string | null;
+  attempted: boolean;
+  score: number | null;
+  max_score: number | null;
+  actual_time_mins: number | null;
+  analysis_time_mins: number | null;
+  test_date: string | null;
+  created_at: string;
+};
+
+export type SyllabusTopic = {
+  id: string;
+  track: string;
+  section: string;
+  topic: string;
+  completed: boolean;
+  position: number;
+};
+
+export async function fetchTests(): Promise<TestRecord[]> {
+  return (unwrap(
+    await supabase.from("tests").select("*").order("created_at", { ascending: false }),
+  ) ?? []) as TestRecord[];
+}
+
+export async function createTest(input: Partial<TestRecord>) {
+  const user_id = await getUserId();
+  return unwrap(
+    await supabase.from("tests").insert({ ...input, user_id } as never).select("*").single(),
+  );
+}
+
+export async function updateTest(id: string, patch: Partial<TestRecord>) {
+  return unwrap(await supabase.from("tests").update(patch).eq("id", id).select("*").single());
+}
+
+export async function deleteTest(id: string) {
+  const { error } = await supabase.from("tests").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteAllTests() {
+  const user_id = await getUserId();
+  const { error } = await supabase.from("tests").delete().eq("user_id", user_id);
+  if (error) throw new Error(error.message);
+}
+
+export async function fetchSyllabus(): Promise<SyllabusTopic[]> {
+  return (unwrap(
+    await supabase
+      .from("syllabus_topics")
+      .select("*")
+      .order("section", { ascending: true })
+      .order("position", { ascending: true }),
+  ) ?? []) as SyllabusTopic[];
+}
+
+export async function loadSyllabusSeed(
+  track: string,
+  seed: { section: string; topics: string[] }[],
+) {
+  const user_id = await getUserId();
+  const rows = seed.flatMap((s) =>
+    s.topics.map((topic, i) => ({ user_id, track, section: s.section, topic, position: i })),
+  );
+  const { error } = await supabase.from("syllabus_topics").insert(rows as never);
+  if (error) throw new Error(error.message);
+}
+
+export async function toggleTopic(id: string, completed: boolean) {
+  return unwrap(
+    await supabase.from("syllabus_topics").update({ completed }).eq("id", id).select("*").single(),
+  );
+}
+
+export async function addTopic(input: { track: string; section: string; topic: string; position: number }) {
+  const user_id = await getUserId();
+  return unwrap(
+    await supabase.from("syllabus_topics").insert({ ...input, user_id } as never).select("*").single(),
+  );
+}
+
+export async function deleteTopic(id: string) {
+  const { error } = await supabase.from("syllabus_topics").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function resetSyllabus(track: string) {
+  const user_id = await getUserId();
+  const { error } = await supabase
+    .from("syllabus_topics")
+    .delete()
+    .eq("user_id", user_id)
+    .eq("track", track);
+  if (error) throw new Error(error.message);
 }

@@ -7,6 +7,12 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -41,18 +47,19 @@ export const Route = createFileRoute("/_authenticated/subjects/$subjectId")({
   component: SubjectDetail,
 });
 
-const DURATIONS = [30, 60, 90, 120, 150, 180, 210, 240];
-
 function SubjectDetail() {
   const { subjectId } = Route.useParams();
   const qc = useQueryClient();
-  const [form, setForm] = useState({
+  const [open, setOpen] = useState(false);
+  const emptyForm = {
     title: "",
     scheduled_date: todayISO(),
-    duration_minutes: 120,
+    hours: 0,
+    minutes: 30,
+    topics: "",
     tag: SESSION_TAGS[0] as string,
-    count: 1,
-  });
+  };
+  const [form, setForm] = useState(emptyForm);
 
   const subjects = useQuery({ queryKey: ["subjects"], queryFn: fetchSubjects });
   const sessions = useQuery({
@@ -71,27 +78,23 @@ function SubjectDetail() {
 
   const add = useMutation({
     mutationFn: async () => {
-      const base = list.length;
-      const start = new Date(`${form.scheduled_date}T00:00:00`);
-      for (let i = 0; i < form.count; i++) {
-        const d = new Date(start);
-        d.setDate(d.getDate() + i);
-        await createSession({
-          subject_id: subjectId,
-          title: form.count > 1 ? `${form.title.trim()} - ${String(i + 1).padStart(2, "0")}` : form.title.trim(),
-          scheduled_date: d.toISOString().slice(0, 10),
-          duration_minutes: form.duration_minutes,
-          tag: form.tag,
-          position: base + i,
-        });
-      }
+      await createSession({
+        subject_id: subjectId,
+        title: form.title.trim(),
+        scheduled_date: form.scheduled_date,
+        duration_minutes: Math.max(5, form.hours * 60 + form.minutes),
+        tag: form.tag,
+        topics: form.topics.trim() || null,
+        position: list.length,
+      });
     },
     onSuccess: () => {
-      setForm({ ...form, title: "", count: 1 });
-      toast.success("Sessions added — they appear in Today's Target on their date");
+      setForm({ ...emptyForm, scheduled_date: form.scheduled_date });
+      setOpen(false);
+      toast.success("Session added — it appears in Today's Target on its date");
       invalidate();
     },
-    onError: () => toast.error("Could not add sessions"),
+    onError: () => toast.error("Could not add session"),
   });
 
   const toggle = useMutation({
@@ -100,6 +103,7 @@ function SubjectDetail() {
     onSuccess: invalidate,
   });
   const remove = useMutation({ mutationFn: deleteSession, onSuccess: invalidate });
+
 
   return (
     <div className="space-y-6">
@@ -155,11 +159,16 @@ function SubjectDetail() {
                 month: "short",
               })}
             </span>
-            <span
-              className={`min-w-0 flex-1 truncate text-sm font-semibold ${s.completed ? "text-muted-foreground line-through" : ""}`}
-            >
-              {s.title}
-            </span>
+            <div className="min-w-0 flex-1">
+              <p
+                className={`truncate text-sm font-semibold ${s.completed ? "text-muted-foreground line-through" : ""}`}
+              >
+                {s.title}
+              </p>
+              {s.topics && (
+                <p className="truncate text-[11px] text-muted-foreground">{s.topics}</p>
+              )}
+            </div>
             <span className="hidden rounded bg-secondary px-2 py-0.5 text-[10px] text-muted-foreground md:block">
               {s.tag}
             </span>
@@ -181,87 +190,103 @@ function SubjectDetail() {
         ))}
       </div>
 
-      <div className="rounded-xl border border-dashed border-border bg-card p-5">
-        <h2 className="flex items-center gap-2 text-sm font-bold">
-          <Plus className="size-4" /> Add new session(s)
-        </h2>
-        <div className="mt-4 grid gap-3 md:grid-cols-5">
-          <div className="space-y-1.5 md:col-span-2">
-            <Label>Lecture / topic</Label>
-            <Input
-              value={form.title}
-              maxLength={140}
-              placeholder="Transactions and Concurrency Control"
-              onChange={(e) => setForm({ ...form, title: e.target.value })}
-            />
+      <Button onClick={() => setOpen(true)} className="w-full sm:w-auto">
+        <Plus className="mr-1.5 size-4" /> Add New Session
+      </Button>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-xl">Add New Session</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label>Session Name *</Label>
+              <Input
+                value={form.title}
+                maxLength={140}
+                placeholder="e.g., Graph Theory 01"
+                onChange={(e) => setForm({ ...form, title: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Date *</Label>
+              <Input
+                type="date"
+                value={form.scheduled_date}
+                onChange={(e) => setForm({ ...form, scheduled_date: e.target.value })}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Hours</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={12}
+                  value={form.hours}
+                  onChange={(e) =>
+                    setForm({ ...form, hours: Math.min(12, Math.max(0, Number(e.target.value) || 0)) })
+                  }
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Minutes</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={59}
+                  placeholder="e.g., 30"
+                  value={form.minutes}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      minutes: Math.min(59, Math.max(0, Number(e.target.value) || 0)),
+                    })
+                  }
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Topics Covered</Label>
+              <Input
+                value={form.topics}
+                maxLength={200}
+                placeholder="e.g., Basics, Graph Theory"
+                onChange={(e) => setForm({ ...form, topics: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Tag</Label>
+              <Select value={form.tag} onValueChange={(v) => setForm({ ...form, tag: v })}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SESSION_TAGS.map((t) => (
+                    <SelectItem key={t} value={t}>
+                      {t}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex gap-3 pt-2">
+              <Button variant="secondary" className="flex-1" onClick={() => setOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                className="flex-[2]"
+                disabled={!form.title.trim() || add.isPending}
+                onClick={() => add.mutate()}
+              >
+                <Check className="mr-1.5 size-4" /> Add Session
+              </Button>
+            </div>
           </div>
-          <div className="space-y-1.5">
-            <Label>Start date</Label>
-            <Input
-              type="date"
-              value={form.scheduled_date}
-              onChange={(e) => setForm({ ...form, scheduled_date: e.target.value })}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Watch time</Label>
-            <Select
-              value={String(form.duration_minutes)}
-              onValueChange={(v) => setForm({ ...form, duration_minutes: Number(v) })}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {DURATIONS.map((d) => (
-                  <SelectItem key={d} value={String(d)}>
-                    {formatHours(d)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label>Tag</Label>
-            <Select value={form.tag} onValueChange={(v) => setForm({ ...form, tag: v })}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {SESSION_TAGS.map((t) => (
-                  <SelectItem key={t} value={t}>
-                    {t}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label>How many parts?</Label>
-            <Input
-              type="number"
-              min={1}
-              max={20}
-              value={form.count}
-              onChange={(e) =>
-                setForm({ ...form, count: Math.min(20, Math.max(1, Number(e.target.value) || 1)) })
-              }
-            />
-          </div>
-          <div className="flex items-end md:col-span-5">
-            <Button
-              disabled={!form.title.trim() || add.isPending}
-              onClick={() => add.mutate()}
-              className="w-full md:w-auto"
-            >
-              <Check className="mr-1.5 size-4" /> Add session{form.count > 1 ? "s" : ""}
-            </Button>
-          </div>
-        </div>
-        <p className="mt-3 text-xs text-muted-foreground">
-          Parts are numbered automatically (- 01, - 02 …) and scheduled on consecutive days.
-        </p>
-      </div>
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }
