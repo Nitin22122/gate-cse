@@ -20,7 +20,7 @@ import {
   createMistake,
   deleteMistake,
   fetchMistakes,
-  fetchSessions,
+  
   fetchSubjects,
   updateMistake,
 } from "@/lib/data";
@@ -28,14 +28,13 @@ import {
 export const Route = createFileRoute("/_authenticated/progress")({
   head: () => ({
     meta: [
-      { title: "Progress & Mistake Logs — GATE 2027 Study Tracker" },
+      { title: "Mistake Logs — GATE 2027 Study Tracker" },
       {
         name: "description",
-        content:
-          "Subject-wise syllabus progress bars plus a mistake log so silly errors never repeat.",
+        content: "Log every silly error and concept slip so it never repeats on exam day.",
       },
-      { property: "og:title", content: "Progress & Mistake Logs — GATE 2027 Study Tracker" },
-      { property: "og:description", content: "Track syllabus progress and log your mistakes." },
+      { property: "og:title", content: "Mistake Logs — GATE 2027 Study Tracker" },
+      { property: "og:description", content: "Track and resolve your recurring GATE mistakes." },
     ],
   }),
   component: ProgressPage,
@@ -46,7 +45,6 @@ function ProgressPage() {
   const [form, setForm] = useState({ title: "", details: "", subject_id: "" });
 
   const subjects = useQuery({ queryKey: ["subjects"], queryFn: fetchSubjects });
-  const sessions = useQuery({ queryKey: ["sessions"], queryFn: () => fetchSessions() });
   const mistakes = useQuery({ queryKey: ["mistakes"], queryFn: fetchMistakes });
 
   const add = useMutation({
@@ -79,34 +77,8 @@ function ProgressPage() {
   return (
     <div className="space-y-8">
       <section>
-        <h1 className="text-2xl font-extrabold">Subject Progress</h1>
-        <div className="mt-4 space-y-3 rounded-2xl border border-border bg-card p-6">
-          {(subjects.data ?? []).length === 0 && (
-            <p className="py-6 text-center text-sm text-muted-foreground">No subjects yet.</p>
-          )}
-          {(subjects.data ?? []).map((s) => {
-            const list = (sessions.data ?? []).filter((x) => x.subject_id === s.id);
-            const done = list.filter((x) => x.completed).length;
-            const pct = list.length ? (done / list.length) * 100 : 0;
-            return (
-              <div key={s.id}>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="font-semibold">{s.name}</span>
-                  <span className="text-muted-foreground">
-                    {done}/{list.length} · {Math.round(pct)}%
-                  </span>
-                </div>
-                <div className="mt-1.5 h-2 w-full rounded-full bg-secondary">
-                  <div className="h-2 rounded-full bg-primary" style={{ width: `${pct}%` }} />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </section>
+        <h1 className="text-2xl font-extrabold">Mistake Logs</h1>
 
-      <section>
-        <h2 className="text-2xl font-extrabold">Mistake Logs</h2>
         <div className="mt-4 grid gap-6 lg:grid-cols-[minmax(0,22rem)_1fr]">
           <div className="space-y-3 rounded-2xl border border-border bg-card p-6">
             <div className="space-y-1.5">

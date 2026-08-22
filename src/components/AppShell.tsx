@@ -9,7 +9,6 @@ import {
   LogOut,
   Menu,
   NotebookPen,
-  Settings,
   Timer,
   TriangleAlert,
   User,
@@ -29,7 +28,6 @@ const NAV = [
   { to: "/journal", label: "Journal", icon: NotebookPen },
   { to: "/progress", label: "Mistakes", icon: TriangleAlert },
   { to: "/profile", label: "Profile", icon: User },
-  { to: "/settings", label: "Settings", icon: Settings },
 ] as const;
 
 export function AppShell({ children }: { children: ReactNode }) {

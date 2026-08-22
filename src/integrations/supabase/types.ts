@@ -84,30 +84,66 @@ export type Database = {
       }
       profiles: {
         Row: {
+          about_me: string | null
           created_at: string
           display_name: string | null
           exam_date: string
           id: string
           prep_start_date: string
+          social_links: string | null
+          stream: string
+          target_branch: string
           updated_at: string
+          user_id: string
+          username: string | null
+        }
+        Insert: {
+          about_me?: string | null
+          created_at?: string
+          display_name?: string | null
+          exam_date?: string
+          id?: string
+          prep_start_date?: string
+          social_links?: string | null
+          stream?: string
+          target_branch?: string
+          updated_at?: string
+          user_id: string
+          username?: string | null
+        }
+        Update: {
+          about_me?: string | null
+          created_at?: string
+          display_name?: string | null
+          exam_date?: string
+          id?: string
+          prep_start_date?: string
+          social_links?: string | null
+          stream?: string
+          target_branch?: string
+          updated_at?: string
+          user_id?: string
+          username?: string | null
+        }
+        Relationships: []
+      }
+      streak_days: {
+        Row: {
+          created_at: string
+          day: string
+          id: string
           user_id: string
         }
         Insert: {
           created_at?: string
-          display_name?: string | null
-          exam_date?: string
+          day?: string
           id?: string
-          prep_start_date?: string
-          updated_at?: string
           user_id: string
         }
         Update: {
           created_at?: string
-          display_name?: string | null
-          exam_date?: string
+          day?: string
           id?: string
-          prep_start_date?: string
-          updated_at?: string
           user_id?: string
         }
         Relationships: []
@@ -159,6 +195,7 @@ export type Database = {
           subject_id: string
           tag: string
           title: string
+          topics: string | null
           updated_at: string
           user_id: string
         }
@@ -173,6 +210,7 @@ export type Database = {
           subject_id: string
           tag?: string
           title: string
+          topics?: string | null
           updated_at?: string
           user_id: string
         }
@@ -187,6 +225,7 @@ export type Database = {
           subject_id?: string
           tag?: string
           title?: string
+          topics?: string | null
           updated_at?: string
           user_id?: string
         }
@@ -234,6 +273,123 @@ export type Database = {
           source?: string | null
           start_date?: string | null
           teacher?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      syllabus_topics: {
+        Row: {
+          completed: boolean
+          created_at: string
+          id: string
+          position: number
+          section: string
+          topic: string
+          track: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          completed?: boolean
+          created_at?: string
+          id?: string
+          position?: number
+          section: string
+          topic: string
+          track?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          completed?: boolean
+          created_at?: string
+          id?: string
+          position?: number
+          section?: string
+          topic?: string
+          track?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      tasks: {
+        Row: {
+          completed: boolean
+          created_at: string
+          due_date: string
+          id: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          completed?: boolean
+          created_at?: string
+          due_date?: string
+          id?: string
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          completed?: boolean
+          created_at?: string
+          due_date?: string
+          id?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      tests: {
+        Row: {
+          actual_time_mins: number | null
+          analysis_time_mins: number | null
+          attempted: boolean
+          category: string | null
+          created_at: string
+          id: string
+          max_score: number | null
+          name: string
+          organization: string
+          score: number | null
+          test_date: string | null
+          test_type: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          actual_time_mins?: number | null
+          analysis_time_mins?: number | null
+          attempted?: boolean
+          category?: string | null
+          created_at?: string
+          id?: string
+          max_score?: number | null
+          name: string
+          organization?: string
+          score?: number | null
+          test_date?: string | null
+          test_type?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          actual_time_mins?: number | null
+          analysis_time_mins?: number | null
+          attempted?: boolean
+          category?: string | null
+          created_at?: string
+          id?: string
+          max_score?: number | null
+          name?: string
+          organization?: string
+          score?: number | null
+          test_date?: string | null
+          test_type?: string
           updated_at?: string
           user_id?: string
         }

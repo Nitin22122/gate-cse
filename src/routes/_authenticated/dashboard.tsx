@@ -1,21 +1,30 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, CheckCircle2, Hourglass, Layers, X } from "lucide-react";
+import { BookOpen, CheckCircle2, Flame, Hourglass, Layers, Plus, X } from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
 
 import { Countdown } from "@/components/Countdown";
+import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { quoteOfTheDay } from "@/lib/constants";
 import {
+  checkInToday,
+  computeStreak,
+  createTask,
   deleteSession,
+  deleteTask,
   fetchProfile,
   fetchSessions,
-  fetchStudyHours,
+  fetchStreakDays,
   fetchSubjects,
+  fetchTasks,
   formatHours,
   todayISO,
   updateSession,
+  updateTask,
 } from "@/lib/data";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
@@ -24,10 +33,10 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
       { title: "Dashboard — GATE 2027 Study Tracker" },
       {
         name: "description",
-        content: "Today's target, countdown to GATE 2027 and your live study analysis in one view.",
+        content: "Today's target, study tasks, daily streak and countdown to GATE 2027 in one view.",
       },
       { property: "og:title", content: "Dashboard — GATE 2027 Study Tracker" },
-      { property: "og:description", content: "Today's target and study analysis at a glance." },
+      { property: "og:description", content: "Today's target, tasks and streak at a glance." },
     ],
   }),
   component: Dashboard,
@@ -48,11 +57,13 @@ function Stat({ icon, value, label }: { icon: React.ReactNode; value: string; la
 function Dashboard() {
   const qc = useQueryClient();
   const today = todayISO();
+  const [taskTitle, setTaskTitle] = useState("");
 
   const profile = useQuery({ queryKey: ["profile"], queryFn: fetchProfile });
   const subjects = useQuery({ queryKey: ["subjects"], queryFn: fetchSubjects });
   const sessions = useQuery({ queryKey: ["sessions"], queryFn: () => fetchSessions() });
-  const hours = useQuery({ queryKey: ["hours"], queryFn: fetchStudyHours });
+  const tasks = useQuery({ queryKey: ["tasks"], queryFn: fetchTasks });
+  const streakDays = useQuery({ queryKey: ["streak"], queryFn: fetchStreakDays });
 
   const toggle = useMutation({
     mutationFn: ({ id, completed }: { id: string; completed: boolean }) =>
@@ -65,17 +76,39 @@ function Dashboard() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["sessions"] }),
   });
 
+  const invalidateTasks = () => qc.invalidateQueries({ queryKey: ["tasks"] });
+  const addTask = useMutation({
+    mutationFn: () => createTask(taskTitle.trim()),
+    onSuccess: () => {
+      setTaskTitle("");
+      invalidateTasks();
+    },
+    onError: () => toast.error("Could not add task"),
+  });
+  const toggleTask = useMutation({
+    mutationFn: ({ id, completed }: { id: string; completed: boolean }) =>
+      updateTask(id, { completed }),
+    onSuccess: invalidateTasks,
+  });
+  const removeTask = useMutation({ mutationFn: deleteTask, onSuccess: invalidateTasks });
+
+  const checkIn = useMutation({
+    mutationFn: checkInToday,
+    onSuccess: () => {
+      toast.success("Streak marked for today 🔥");
+      qc.invalidateQueries({ queryKey: ["streak"] });
+    },
+    onError: () => toast.error("Could not mark streak"),
+  });
+
+  const days = streakDays.data ?? [];
+  const streak = computeStreak(days);
+  const checkedInToday = days.includes(today);
+
   const all = sessions.data ?? [];
   const todays = all.filter((s) => s.scheduled_date === today);
   const doneToday = todays.filter((s) => s.completed).length;
   const subjectName = (id: string) => subjects.data?.find((s) => s.id === id)?.name ?? "Subject";
-
-  const totalHours = (hours.data ?? []).reduce((a, h) => a + Number(h.hours), 0);
-  const perSubject = new Map<string, number>();
-  for (const h of hours.data ?? [])
-    perSubject.set(h.subject_id, (perSubject.get(h.subject_id) ?? 0) + Number(h.hours));
-  const top = [...perSubject.entries()].sort((a, b) => b[1] - a[1])[0];
-  const days = new Set((hours.data ?? []).map((h) => h.log_date)).size;
 
   const prepDay = profile.data
     ? Math.max(
@@ -88,6 +121,23 @@ function Dashboard() {
 
   return (
     <div className="space-y-8">
+      <div className="flex justify-end">
+        <div className="flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5">
+          <Flame className="size-4 text-primary" />
+          <span className="text-sm font-bold text-primary">Day {streak}</span>
+          <button
+            type="button"
+            onClick={() => checkIn.mutate()}
+            disabled={checkedInToday || checkIn.isPending}
+            aria-label={checkedInToday ? "Streak already marked today" : "Mark today's streak"}
+            title={checkedInToday ? "Already marked today" : "Mark today"}
+            className="flex size-6 items-center justify-center rounded-full bg-primary/20 text-primary transition-colors hover:bg-primary/30 disabled:opacity-50"
+          >
+            {checkedInToday ? <CheckCircle2 className="size-3.5" /> : <Plus className="size-3.5" />}
+          </button>
+        </div>
+      </div>
+
       <section className="rounded-2xl border border-border bg-card p-8 text-center">
         <p className="text-lg font-medium text-foreground md:text-xl">{quoteOfTheDay()}</p>
         <p className="mt-2 text-[11px] font-semibold tracking-[0.2em] text-muted-foreground">
@@ -116,6 +166,59 @@ function Dashboard() {
           value={String(all.filter((s) => s.completed).length)}
           label="COMPLETED"
         />
+      </section>
+
+      <section className="space-y-3">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (taskTitle.trim()) addTask.mutate();
+          }}
+          className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-2.5"
+        >
+          <Plus className="size-4 shrink-0 text-muted-foreground" />
+          <Input
+            value={taskTitle}
+            maxLength={160}
+            onChange={(e) => setTaskTitle(e.target.value)}
+            placeholder="Add a new study task…"
+            className="border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
+          />
+          <Button type="submit" size="sm" disabled={!taskTitle.trim() || addTask.isPending}>
+            <Plus className="mr-1 size-4" /> Add
+          </Button>
+        </form>
+
+        <div className="space-y-2 rounded-2xl border border-dashed border-border bg-card/40 p-4">
+          {(tasks.data ?? []).length === 0 && (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              No tasks yet. Add a test, revision or anything you need to get done.
+            </p>
+          )}
+          {(tasks.data ?? []).map((t) => (
+            <div
+              key={t.id}
+              className="flex items-center gap-3 rounded-lg border border-border bg-background px-4 py-2.5"
+            >
+              <Checkbox
+                checked={t.completed}
+                onCheckedChange={(v) => toggleTask.mutate({ id: t.id, completed: Boolean(v) })}
+              />
+              <p
+                className={`min-w-0 flex-1 truncate text-sm ${t.completed ? "text-muted-foreground line-through" : ""}`}
+              >
+                {t.title}
+              </p>
+              <button
+                className="text-muted-foreground hover:text-destructive"
+                onClick={() => removeTask.mutate(t.id)}
+                aria-label="Delete task"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+          ))}
+        </div>
       </section>
 
       <section className="rounded-2xl border border-border bg-card p-6">
@@ -186,24 +289,6 @@ function Dashboard() {
               </button>
             </div>
           ))}
-        </div>
-      </section>
-
-      <section className="rounded-2xl border border-border bg-card p-6">
-        <h2 className="text-lg font-bold">Study Analysis</h2>
-        <div className="mt-4 grid gap-4 sm:grid-cols-4">
-          <Stat icon={<span />} value={`${totalHours.toFixed(1)}h`} label="TOTAL HOURS" />
-          <Stat
-            icon={<span />}
-            value={top ? subjectName(top[0]).split(" ")[0]! : "—"}
-            label="TOP SUBJECT"
-          />
-          <Stat icon={<span />} value={String(days)} label="DAYS LOGGED" />
-          <Stat
-            icon={<span />}
-            value={days ? `${(totalHours / days).toFixed(1)}h` : "0h"}
-            label="AVG DAILY"
-          />
         </div>
       </section>
     </div>

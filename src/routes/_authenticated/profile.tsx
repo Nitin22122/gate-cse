@@ -11,7 +11,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/supabase/client";
 import {
+  computeStreak,
   fetchProfile,
+  fetchStreakDays,
   fetchStudyHours,
   fetchSubjects,
   fetchSyllabus,
@@ -99,6 +101,8 @@ function ProfilePage() {
     onError: () => toast.error("Could not update profile"),
   });
 
+  const streakDays = useQuery({ queryKey: ["streak"], queryFn: fetchStreakDays });
+
   const rows = hours.data ?? [];
   const today = todayISO();
   const y = new Date();
@@ -123,16 +127,7 @@ function ProfilePage() {
     .sort((a, b) => b.value - a.value);
 
   const tracks = ["CS", "DA"] as const;
-  const streak = (() => {
-    const dates = new Set(rows.map((r) => r.log_date));
-    let n = 0;
-    const d = new Date();
-    while (dates.has(d.toISOString().slice(0, 10))) {
-      n += 1;
-      d.setDate(d.getDate() - 1);
-    }
-    return n;
-  })();
+  const streak = computeStreak(streakDays.data ?? []);
 
   return (
     <div className="space-y-6">

@@ -320,3 +320,60 @@ export async function resetSyllabus(track: string) {
     .eq("track", track);
   if (error) throw new Error(error.message);
 }
+
+export type Task = {
+  id: string;
+  title: string;
+  completed: boolean;
+  due_date: string;
+  created_at: string;
+};
+
+export async function fetchTasks(): Promise<Task[]> {
+  return (unwrap(
+    await supabase.from("tasks").select("*").order("created_at", { ascending: false }),
+  ) ?? []) as Task[];
+}
+
+export async function createTask(title: string) {
+  const user_id = await getUserId();
+  return unwrap(
+    await supabase.from("tasks").insert({ title, user_id } as never).select("*").single(),
+  );
+}
+
+export async function updateTask(id: string, patch: Partial<Task>) {
+  return unwrap(await supabase.from("tasks").update(patch).eq("id", id).select("*").single());
+}
+
+export async function deleteTask(id: string) {
+  const { error } = await supabase.from("tasks").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function fetchStreakDays(): Promise<string[]> {
+  const rows = (unwrap(
+    await supabase.from("streak_days").select("day").order("day", { ascending: false }),
+  ) ?? []) as { day: string }[];
+  return rows.map((r) => r.day);
+}
+
+export async function checkInToday() {
+  const user_id = await getUserId();
+  const { error } = await supabase
+    .from("streak_days")
+    .upsert({ user_id, day: todayISO() } as never, { onConflict: "user_id,day" });
+  if (error) throw new Error(error.message);
+}
+
+export function computeStreak(days: string[]): number {
+  const set = new Set(days);
+  const d = new Date();
+  if (!set.has(d.toISOString().slice(0, 10))) d.setDate(d.getDate() - 1);
+  let n = 0;
+  while (set.has(d.toISOString().slice(0, 10))) {
+    n += 1;
+    d.setDate(d.getDate() - 1);
+  }
+  return n;
+}
