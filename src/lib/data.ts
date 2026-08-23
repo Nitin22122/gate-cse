@@ -377,3 +377,69 @@ export function computeStreak(days: string[]): number {
   }
   return n;
 }
+
+export type StudyMaterial = {
+  id: string;
+  user_id: string;
+  subject_id: string;
+  title: string;
+  kind: string;
+  file_path: string;
+  file_name: string;
+  size_bytes: number | null;
+  created_at: string;
+};
+
+export const MATERIAL_KINDS = ["Notes", "DPP", "Assignment", "PYQ", "Book", "Other"] as const;
+
+export async function fetchMaterials(subjectId: string): Promise<StudyMaterial[]> {
+  return (unwrap(
+    await supabase
+      .from("study_materials")
+      .select("*")
+      .eq("subject_id", subjectId)
+      .order("created_at", { ascending: false }),
+  ) ?? []) as StudyMaterial[];
+}
+
+export async function uploadMaterial(input: {
+  subject_id: string;
+  title: string;
+  kind: string;
+  file: File;
+}) {
+  const user_id = await getUserId();
+  const safe = input.file.name.replace(/[^\w.\-]+/g, "_");
+  const path = `${user_id}/${input.subject_id}/${Date.now()}-${safe}`;
+  const up = await supabase.storage.from("study-materials").upload(path, input.file);
+  if (up.error) throw new Error(up.error.message);
+  return unwrap(
+    await supabase
+      .from("study_materials")
+      .insert({
+        user_id,
+        subject_id: input.subject_id,
+        title: input.title || input.file.name,
+        kind: input.kind,
+        file_path: path,
+        file_name: input.file.name,
+        size_bytes: input.file.size,
+      } as never)
+      .select("*")
+      .single(),
+  );
+}
+
+export async function materialUrl(path: string) {
+  const { data, error } = await supabase.storage
+    .from("study-materials")
+    .createSignedUrl(path, 60 * 60);
+  if (error) throw new Error(error.message);
+  return data.signedUrl;
+}
+
+export async function deleteMaterial(m: StudyMaterial) {
+  await supabase.storage.from("study-materials").remove([m.file_path]);
+  const { error } = await supabase.from("study_materials").delete().eq("id", m.id);
+  if (error) throw new Error(error.message);
+}

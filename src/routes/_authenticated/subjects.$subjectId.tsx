@@ -1,8 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { ArrowLeft, Check, Plus, X } from "lucide-react";
+import { useRef, useState } from "react";
+import { ArrowLeft, Check, Download, FileText, Plus, Upload, X } from "lucide-react";
 import { toast } from "sonner";
+
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -23,14 +24,20 @@ import {
 } from "@/components/ui/select";
 import {
   createSession,
+  deleteMaterial,
   deleteSession,
+  fetchMaterials,
   fetchSessions,
   fetchSubjects,
   formatHours,
+  MATERIAL_KINDS,
+  materialUrl,
   SESSION_TAGS,
   todayISO,
   updateSession,
+  uploadMaterial,
 } from "@/lib/data";
+
 
 export const Route = createFileRoute("/_authenticated/subjects/$subjectId")({
   head: () => ({
@@ -103,6 +110,45 @@ function SubjectDetail() {
     onSuccess: invalidate,
   });
   const remove = useMutation({ mutationFn: deleteSession, onSuccess: invalidate });
+
+  // --- study materials ---
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [matTitle, setMatTitle] = useState("");
+  const [matKind, setMatKind] = useState<string>(MATERIAL_KINDS[0]);
+
+  const materials = useQuery({
+    queryKey: ["materials", subjectId],
+    queryFn: () => fetchMaterials(subjectId),
+  });
+
+  const upload = useMutation({
+    mutationFn: () =>
+      uploadMaterial({ subject_id: subjectId, title: matTitle.trim(), kind: matKind, file: file! }),
+    onSuccess: () => {
+      setFile(null);
+      setMatTitle("");
+      if (fileRef.current) fileRef.current.value = "";
+      qc.invalidateQueries({ queryKey: ["materials", subjectId] });
+      toast.success("Material uploaded");
+    },
+    onError: () => toast.error("Upload failed"),
+  });
+
+  const removeMaterial = useMutation({
+    mutationFn: deleteMaterial,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["materials", subjectId] }),
+  });
+
+  async function openMaterial(path: string) {
+    try {
+      window.open(await materialUrl(path), "_blank", "noopener");
+    } catch {
+      toast.error("Could not open file");
+    }
+  }
+
+
 
 
   return (
@@ -287,6 +333,92 @@ function SubjectDetail() {
         </DialogContent>
       </Dialog>
 
+      <section className="space-y-3 rounded-xl border border-border bg-card p-5">
+        <div>
+          <h2 className="text-lg font-bold">Study Material</h2>
+          <p className="text-xs text-muted-foreground">
+            Upload notes, DPPs, assignments or any other file for this subject.
+          </p>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-[1fr_160px_auto]">
+          <div className="space-y-1.5">
+            <Label>Title</Label>
+            <Input
+              value={matTitle}
+              maxLength={120}
+              placeholder="e.g., Normalization Notes"
+              onChange={(e) => setMatTitle(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Type</Label>
+            <Select value={matKind} onValueChange={setMatKind}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {MATERIAL_KINDS.map((k) => (
+                  <SelectItem key={k} value={k}>
+                    {k}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>File</Label>
+            <Input
+              ref={fileRef}
+              type="file"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            />
+          </div>
+        </div>
+
+        <Button disabled={!file || upload.isPending} onClick={() => upload.mutate()}>
+          <Upload className="mr-1.5 size-4" /> {upload.isPending ? "Uploading…" : "Upload"}
+        </Button>
+
+        <div className="space-y-2 pt-2">
+          {(materials.data ?? []).length === 0 && (
+            <p className="text-sm text-muted-foreground">No material uploaded yet.</p>
+          )}
+          {(materials.data ?? []).map((m) => (
+            <div
+              key={m.id}
+              className="flex items-center gap-3 rounded-lg border border-border bg-background px-4 py-2.5"
+            >
+              <FileText className="size-4 shrink-0 text-primary" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold">{m.title}</p>
+                <p className="truncate text-[11px] text-muted-foreground">
+                  {m.file_name}
+                  {m.size_bytes ? ` · ${(m.size_bytes / 1024 / 1024).toFixed(2)} MB` : ""}
+                </p>
+              </div>
+              <span className="hidden rounded bg-secondary px-2 py-0.5 text-[10px] text-muted-foreground sm:block">
+                {m.kind}
+              </span>
+              <button
+                className="text-muted-foreground hover:text-primary"
+                onClick={() => openMaterial(m.file_path)}
+                aria-label={`Open ${m.title}`}
+              >
+                <Download className="size-4" />
+              </button>
+              <button
+                className="text-muted-foreground hover:text-destructive"
+                onClick={() => removeMaterial.mutate(m)}
+                aria-label={`Delete ${m.title}`}
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
+
   );
 }
