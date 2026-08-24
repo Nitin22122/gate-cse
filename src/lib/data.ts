@@ -443,3 +443,137 @@ export async function deleteMaterial(m: StudyMaterial) {
   const { error } = await supabase.from("study_materials").delete().eq("id", m.id);
   if (error) throw new Error(error.message);
 }
+
+/* ---------------- Practice Arena ---------------- */
+
+export type PracticeQuestion = {
+  id: string;
+  user_id: string;
+  author_name: string | null;
+  subject: string;
+  qtype: string;
+  difficulty: string;
+  tag: string;
+  question: string;
+  options: string[];
+  correct_index: number;
+  explanation: string | null;
+  status: string;
+  created_at: string;
+};
+
+export type PracticeAttempt = {
+  id: string;
+  question_id: string;
+  selected_index: number | null;
+  is_correct: boolean;
+  skipped: boolean;
+  time_taken_secs: number | null;
+  created_at: string;
+};
+
+export const PRACTICE_SUBJECTS = [
+  "DBMS",
+  "Prog. and DS",
+  "Algorithms",
+  "Operating System",
+  "Computer Networks",
+  "TOC",
+  "Compiler Design",
+  "COA",
+  "Digital Logic",
+  "Discrete Maths",
+  "Engg. Maths",
+  "Aptitude",
+] as const;
+
+export const PRACTICE_TYPES = ["MCQ", "MSQ", "NAT"] as const;
+export const PRACTICE_LEVELS = ["Easy", "Medium", "Hard"] as const;
+export const PRACTICE_TAGS = [
+  "Untagged",
+  "PYQ",
+  "Concept",
+  "Tricky",
+  "Numerical",
+  "Theory",
+] as const;
+
+export async function fetchPracticeQuestions(): Promise<PracticeQuestion[]> {
+  return (unwrap(
+    await supabase
+      .from("practice_questions")
+      .select("*")
+      .order("created_at", { ascending: true }),
+  ) ?? []) as PracticeQuestion[];
+}
+
+export async function fetchMyQuestions(): Promise<PracticeQuestion[]> {
+  const user_id = await getUserId();
+  return (unwrap(
+    await supabase
+      .from("practice_questions")
+      .select("*")
+      .eq("user_id", user_id)
+      .order("created_at", { ascending: false }),
+  ) ?? []) as PracticeQuestion[];
+}
+
+export async function submitQuestion(input: {
+  subject: string;
+  qtype: string;
+  difficulty: string;
+  tag: string;
+  question: string;
+  options: string[];
+  correct_index: number;
+  explanation?: string;
+  author_name?: string | null;
+}) {
+  const user_id = await getUserId();
+  return unwrap(
+    await supabase
+      .from("practice_questions")
+      .insert({ ...input, user_id, status: "pending" } as never)
+      .select("*")
+      .single(),
+  );
+}
+
+export async function deleteQuestion(id: string) {
+  const { error } = await supabase.from("practice_questions").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function fetchMyAttempts(): Promise<PracticeAttempt[]> {
+  return (unwrap(
+    await supabase.from("practice_attempts").select("*").order("created_at", { ascending: false }),
+  ) ?? []) as PracticeAttempt[];
+}
+
+export async function recordAttempt(input: {
+  question_id: string;
+  selected_index: number | null;
+  is_correct: boolean;
+  skipped: boolean;
+  time_taken_secs?: number | null;
+}) {
+  const user_id = await getUserId();
+  return unwrap(
+    await supabase.from("practice_attempts").insert({ ...input, user_id } as never).select("*").single(),
+  );
+}
+
+export type LeaderboardRow = {
+  user_id: string;
+  display_name: string;
+  solved: number;
+  attempts: number;
+  accuracy: number;
+  contributed: number;
+};
+
+export async function fetchLeaderboard(): Promise<LeaderboardRow[]> {
+  const { data, error } = await supabase.rpc("practice_leaderboard");
+  if (error) throw new Error(error.message);
+  return (data ?? []) as LeaderboardRow[];
+}

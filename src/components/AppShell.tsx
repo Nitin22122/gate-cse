@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   BarChart3,
   BookOpen,
+  Brain,
   ClipboardList,
   LayoutDashboard,
   ListChecks,
@@ -25,6 +26,7 @@ const NAV = [
   { to: "/syllabus", label: "Syllabus", icon: ListChecks },
   { to: "/tests", label: "Tests", icon: ClipboardList },
   { to: "/analysis", label: "Analysis", icon: BarChart3 },
+  { to: "/practice", label: "Practice Arena", icon: Brain },
   { to: "/journal", label: "Journal", icon: NotebookPen },
   { to: "/progress", label: "Mistakes", icon: TriangleAlert },
   { to: "/profile", label: "Profile", icon: User },
