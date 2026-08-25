@@ -577,3 +577,154 @@ export async function fetchLeaderboard(): Promise<LeaderboardRow[]> {
   if (error) throw new Error(error.message);
   return (data ?? []) as LeaderboardRow[];
 }
+
+/* ---------------- PYQ Arena ---------------- */
+
+export type PyqQuestion = {
+  id: string;
+  user_id: string;
+  year: number;
+  paper: string;
+  subject: string;
+  topic: string;
+  qtype: string;
+  marks: number;
+  question: string;
+  options: string[];
+  correct_index: number;
+  answer_text: string | null;
+  explanation: string | null;
+  created_at: string;
+};
+
+export type PyqAttempt = {
+  id: string;
+  question_id: string;
+  selected_index: number | null;
+  answer_text: string | null;
+  is_correct: boolean;
+  skipped: boolean;
+  created_at: string;
+};
+
+export const PYQ_YEARS = Array.from({ length: 27 }, (_, i) => 2026 - i);
+export const PYQ_PAPERS = ["CS", "DA"] as const;
+
+export async function fetchPyqQuestions(): Promise<PyqQuestion[]> {
+  return (unwrap(
+    await supabase
+      .from("pyq_questions")
+      .select("*")
+      .order("year", { ascending: false })
+      .order("created_at", { ascending: true }),
+  ) ?? []) as PyqQuestion[];
+}
+
+export async function fetchMyPyqQuestions(): Promise<PyqQuestion[]> {
+  const user_id = await getUserId();
+  return (unwrap(
+    await supabase
+      .from("pyq_questions")
+      .select("*")
+      .eq("user_id", user_id)
+      .order("created_at", { ascending: false }),
+  ) ?? []) as PyqQuestion[];
+}
+
+export type PyqInput = {
+  year: number;
+  paper: string;
+  subject: string;
+  topic: string;
+  qtype: string;
+  marks: number;
+  question: string;
+  options: string[];
+  correct_index: number;
+  answer_text?: string | null;
+  explanation?: string | null;
+};
+
+export async function addPyqQuestions(rows: PyqInput[]) {
+  const user_id = await getUserId();
+  const payload = rows.map((r) => ({ ...r, user_id }));
+  const { error } = await supabase.from("pyq_questions").insert(payload as never);
+  if (error) throw new Error(error.message);
+}
+
+export async function deletePyqQuestion(id: string) {
+  const { error } = await supabase.from("pyq_questions").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function fetchMyPyqAttempts(): Promise<PyqAttempt[]> {
+  return (unwrap(
+    await supabase.from("pyq_attempts").select("*").order("created_at", { ascending: false }),
+  ) ?? []) as PyqAttempt[];
+}
+
+export async function recordPyqAttempt(input: {
+  question_id: string;
+  selected_index: number | null;
+  answer_text?: string | null;
+  is_correct: boolean;
+  skipped: boolean;
+}) {
+  const user_id = await getUserId();
+  const { error } = await supabase.from("pyq_attempts").insert({ ...input, user_id } as never);
+  if (error) throw new Error(error.message);
+}
+
+/** Parse pasted JSON array or line format:
+ * year | subject | topic | question | optA ;; optB ;; optC ;; optD | correctNumber | explanation
+ */
+export function parsePyqBulk(text: string, fallbackPaper: string): PyqInput[] {
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+  if (trimmed.startsWith("[")) {
+    const arr = JSON.parse(trimmed) as Record<string, unknown>[];
+    return arr.map((r) => {
+      const options = Array.isArray(r['options']) ? (r['options'] as string[]).map(String) : [];
+      const correct = Number(r['correct_index'] ?? r['correct'] ?? 1);
+      return {
+        year: Number(r['year'] ?? 2024),
+        paper: String(r['paper'] ?? fallbackPaper),
+        subject: String(r['subject'] ?? "Algorithms"),
+        topic: String(r['topic'] ?? "Untagged"),
+        qtype: String(r['qtype'] ?? (options.length ? "MCQ" : "NAT")),
+        marks: Number(r['marks'] ?? 1),
+        question: String(r['question'] ?? ""),
+        options,
+        correct_index: r['correct_index'] !== undefined ? correct : Math.max(0, correct - 1),
+        answer_text: r['answer_text'] ? String(r['answer_text']) : null,
+        explanation: r['explanation'] ? String(r['explanation']) : null,
+      } satisfies PyqInput;
+    }).filter((r) => r.question.trim().length > 0);
+  }
+
+  return trimmed
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const p = line.split("|").map((s) => s.trim());
+      const options = (p[4] ?? "")
+        .split(";;")
+        .map((o) => o.trim())
+        .filter(Boolean);
+      return {
+        year: Number(p[0] ?? 2024) || 2024,
+        paper: fallbackPaper,
+        subject: p[1] || "Algorithms",
+        topic: p[2] || "Untagged",
+        qtype: options.length ? "MCQ" : "NAT",
+        marks: 1,
+        question: p[3] ?? "",
+        options,
+        correct_index: Math.max(0, (Number(p[5] ?? 1) || 1) - 1),
+        answer_text: options.length ? null : (p[5] ?? null),
+        explanation: p[6] ?? null,
+      } satisfies PyqInput;
+    })
+    .filter((r) => r.question.length > 0);
+}
