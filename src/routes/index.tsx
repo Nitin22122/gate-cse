@@ -1,11 +1,11 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { BarChart3, BookOpen, NotebookPen, Target, Timer } from "lucide-react";
+import { BarChart3, BookOpen, NotebookPen, Target } from "lucide-react"; // ← REMOVED Timer import
 
 import { Button } from "@/components/ui/button";
 import { Countdown } from "@/components/Countdown";
 import { supabase } from "@/integrations/supabase/client";
-import { quoteOfTheDay, TIMER_URL } from "@/lib/constants";
+import { quoteOfTheDay } from "@/lib/constants"; // ← REMOVED TIMER_URL
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -48,15 +48,18 @@ function Landing() {
           GATE<span className="text-primary">2027</span>
         </span>
         <div className="flex gap-2">
-          <a href={TIMER_URL} target="_blank" rel="noreferrer">
-            <Button variant="ghost" size="sm">
-              <Timer className="mr-1.5 size-4" /> Focus Timer
-            </Button>
-          </a>
+          {/* REMOVED: Timer button from header - only show when logged in */}
           {signedIn ? (
-            <Button size="sm" onClick={() => navigate({ to: "/dashboard" })}>
-              Open dashboard
-            </Button>
+            <>
+              <Link to="/timer">
+                <Button variant="ghost" size="sm">
+                  <Timer className="mr-1.5 size-4" /> Focus Timer
+                </Button>
+              </Link>
+              <Button size="sm" onClick={() => navigate({ to: "/dashboard" })}>
+                Open dashboard
+              </Button>
+            </>
           ) : (
             <Link to="/auth">
               <Button size="sm">Sign in</Button>
@@ -80,11 +83,14 @@ function Landing() {
           <Link to={signedIn ? "/dashboard" : "/auth"}>
             <Button size="lg">{signedIn ? "Go to dashboard" : "Start tracking free"}</Button>
           </Link>
-          <a href={TIMER_URL} target="_blank" rel="noreferrer">
-            <Button size="lg" variant="secondary">
-              Open Focus Timer
-            </Button>
-          </a>
+          {/* REMOVED: Timer button from hero section - only show when logged in */}
+          {signedIn && (
+            <Link to="/timer">
+              <Button size="lg" variant="secondary">
+                Open Focus Timer
+              </Button>
+            </Link>
+          )}
         </div>
       </section>
 
