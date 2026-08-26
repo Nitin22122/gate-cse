@@ -71,7 +71,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </nav>
 
       <div className="space-y-2 border-t border-border pt-3">
-        {/* Timer button - only visible to logged in users (AppShell only renders when logged in) */}
+        {/* Timer button - only visible in dashboard (AppShell only renders when logged in) */}
         <Link to="/timer" onClick={() => setOpen(false)}>
           <Button variant="secondary" size="sm" className="w-full justify-start">
             <Timer className="mr-2 size-4" /> Focus Timer

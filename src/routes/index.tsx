@@ -1,11 +1,11 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { BarChart3, BookOpen, NotebookPen, Target, Timer } from "lucide-react"; // ← KEEP Timer import
+import { BarChart3, BookOpen, NotebookPen, Target } from "lucide-react"; // ← REMOVED Timer import
 
 import { Button } from "@/components/ui/button";
 import { Countdown } from "@/components/Countdown";
 import { supabase } from "@/integrations/supabase/client";
-import { quoteOfTheDay } from "@/lib/constants"; // ← REMOVED TIMER_URL
+import { quoteOfTheDay } from "@/lib/constants";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -48,17 +48,11 @@ function Landing() {
           GATE<span className="text-primary">2027</span>
         </span>
         <div className="flex gap-2">
+          {/* REMOVED: Timer button from header completely */}
           {signedIn ? (
-            <>
-              <Link to="/timer">
-                <Button variant="ghost" size="sm">
-                  <Timer className="mr-1.5 size-4" /> Focus Timer
-                </Button>
-              </Link>
-              <Button size="sm" onClick={() => navigate({ to: "/dashboard" })}>
-                Open dashboard
-              </Button>
-            </>
+            <Button size="sm" onClick={() => navigate({ to: "/dashboard" })}>
+              Open dashboard
+            </Button>
           ) : (
             <Link to="/auth">
               <Button size="sm">Sign in</Button>
@@ -82,13 +76,7 @@ function Landing() {
           <Link to={signedIn ? "/dashboard" : "/auth"}>
             <Button size="lg">{signedIn ? "Go to dashboard" : "Start tracking free"}</Button>
           </Link>
-          {signedIn && (
-            <Link to="/timer">
-              <Button size="lg" variant="secondary">
-                Open Focus Timer
-              </Button>
-            </Link>
-          )}
+          {/* REMOVED: Timer button from hero section completely */}
         </div>
       </section>
 
