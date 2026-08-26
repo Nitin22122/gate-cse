@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { BarChart3, BookOpen, NotebookPen, Target } from "lucide-react"; // ← REMOVED Timer import
+import { BarChart3, BookOpen, NotebookPen, Target, Timer } from "lucide-react"; // ← KEEP Timer import
 
 import { Button } from "@/components/ui/button";
 import { Countdown } from "@/components/Countdown";
@@ -48,7 +48,6 @@ function Landing() {
           GATE<span className="text-primary">2027</span>
         </span>
         <div className="flex gap-2">
-          {/* REMOVED: Timer button from header - only show when logged in */}
           {signedIn ? (
             <>
               <Link to="/timer">
@@ -83,7 +82,6 @@ function Landing() {
           <Link to={signedIn ? "/dashboard" : "/auth"}>
             <Button size="lg">{signedIn ? "Go to dashboard" : "Start tracking free"}</Button>
           </Link>
-          {/* REMOVED: Timer button from hero section - only show when logged in */}
           {signedIn && (
             <Link to="/timer">
               <Button size="lg" variant="secondary">
