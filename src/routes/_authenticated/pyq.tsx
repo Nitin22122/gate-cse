@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useRef } from "react";
 import {
   CheckCircle2,
   Layers,
@@ -9,6 +9,9 @@ import {
   Trash2,
   Upload,
   XCircle,
+  ImagePlus,
+  X,
+  Image as ImageIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -18,6 +21,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -61,6 +65,18 @@ export const Route = createFileRoute("/_authenticated/pyq")({
 });
 
 const LETTERS = ["A", "B", "C", "D", "E", "F"];
+const QUESTION_TYPES = ["MCQ", "MSQ", "NAT"] as const;
+const MARKS_OPTIONS = [1, 2] as const;
+
+type QuestionType = typeof QUESTION_TYPES[number];
+type Marks = typeof MARKS_OPTIONS[number];
+
+interface ExtendedPyqQuestion extends PyqQuestion {
+  qtype: QuestionType;
+  marks: Marks;
+  image?: string; // Base64 or URL
+  msq_correct_indices?: number[]; // For MSQ questions
+}
 
 function PyqPage() {
   return (
@@ -100,10 +116,12 @@ function PyqPage() {
   );
 }
 
-function useFilters(list: PyqQuestion[]) {
+function useFilters(list: ExtendedPyqQuestion[]) {
   const [year, setYear] = useState("all");
   const [subject, setSubject] = useState("all");
   const [topic, setTopic] = useState("all");
+  const [qtype, setQtype] = useState("all");
+  const [marks, setMarks] = useState("all");
 
   const topics = useMemo(() => {
     const set = new Set(
@@ -121,9 +139,11 @@ function useFilters(list: PyqQuestion[]) {
         (q) =>
           (year === "all" || String(q.year) === year) &&
           (subject === "all" || q.subject === subject) &&
-          (topic === "all" || q.topic === topic),
+          (topic === "all" || q.topic === topic) &&
+          (qtype === "all" || q.qtype === qtype) &&
+          (marks === "all" || String(q.marks) === marks),
       ),
-    [list, year, subject, topic],
+    [list, year, subject, topic, qtype, marks],
   );
 
   const controls = (
@@ -139,6 +159,8 @@ function useFilters(list: PyqQuestion[]) {
         options={PRACTICE_SUBJECTS}
       />
       <Picker value={topic} onChange={setTopic} label="All Topics" options={topics} />
+      <Picker value={qtype} onChange={setQtype} label="All Types" options={QUESTION_TYPES} />
+      <Picker value={marks} onChange={setMarks} label="All Marks" options={MARKS_OPTIONS.map(String)} />
     </div>
   );
 
@@ -177,10 +199,11 @@ function Solve() {
   const qc = useQueryClient();
   const questions = useQuery({ queryKey: ["pyq-all"], queryFn: fetchPyqQuestions });
   const attempts = useQuery({ queryKey: ["pyq-attempts"], queryFn: fetchMyPyqAttempts });
-  const { filtered, controls } = useFilters(questions.data ?? []);
+  const { filtered, controls } = useFilters((questions.data ?? []) as ExtendedPyqQuestion[]);
 
   const [index, setIndex] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
+  const [msqSelected, setMsqSelected] = useState<number[]>([]);
   const [natValue, setNatValue] = useState("");
   const [revealed, setRevealed] = useState(false);
 
@@ -196,11 +219,13 @@ function Solve() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["pyq-attempts"] }),
   });
 
-  const q = filtered[Math.min(index, Math.max(filtered.length - 1, 0))];
-  const isNat = !!q && q.options.length === 0;
+  const q = filtered[Math.min(index, Math.max(filtered.length - 1, 0))] as ExtendedPyqQuestion;
+  const isNat = !!q && q.qtype === "NAT";
+  const isMsq = !!q && q.qtype === "MSQ";
 
   function reset() {
     setSelected(null);
+    setMsqSelected([]);
     setNatValue("");
     setRevealed(false);
   }
@@ -210,16 +235,36 @@ function Solve() {
     setIndex((i) => (filtered.length ? (i + 1) % filtered.length : 0));
   }
 
+  function toggleMsqOption(idx: number) {
+    setMsqSelected((prev) =>
+      prev.includes(idx) ? prev.filter((i) => i !== idx) : [...prev, idx]
+    );
+  }
+
   function submit() {
     if (!q) return;
-    const correct = isNat
-      ? natValue.trim() !== "" &&
-        natValue.trim().toLowerCase() === (q.answer_text ?? "").trim().toLowerCase()
-      : selected === q.correct_index;
+    
+    let correct = false;
+    let selectedIndices: number[] | null = null;
+
+    if (isNat) {
+      correct = natValue.trim() !== "" &&
+        natValue.trim().toLowerCase() === (q.answer_text ?? "").trim().toLowerCase();
+    } else if (isMsq) {
+      const correctIndices = (q as ExtendedPyqQuestion).msq_correct_indices || [];
+      selectedIndices = msqSelected.sort();
+      correct = correctIndices.length === msqSelected.length &&
+        correctIndices.every((v, i) => v === msqSelected[i]);
+    } else {
+      correct = selected === q.correct_index;
+      selectedIndices = selected !== null ? [selected] : null;
+    }
+
     setRevealed(true);
     save.mutate({
       question_id: q.id,
-      selected_index: isNat ? null : selected,
+      selected_index: isNat ? null : (isMsq ? null : selected),
+      selected_indices: isMsq ? msqSelected : null,
       answer_text: isNat ? natValue.trim() : null,
       is_correct: correct,
       skipped: false,
@@ -231,11 +276,21 @@ function Solve() {
       save.mutate({
         question_id: q.id,
         selected_index: null,
+        selected_indices: null,
         answer_text: null,
         is_correct: false,
         skipped: true,
       });
     next();
+  }
+
+  function getTypeColor(type: string) {
+    switch (type) {
+      case "MCQ": return "bg-blue-500";
+      case "MSQ": return "bg-purple-500";
+      case "NAT": return "bg-green-500";
+      default: return "bg-gray-500";
+    }
   }
 
   return (
@@ -255,17 +310,28 @@ function Solve() {
         </div>
       ) : (
         <div className="rounded-2xl border border-border bg-card p-6">
-          <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-primary">
-            <span>GATE {q.year}</span>
+          <div className="flex flex-wrap items-center gap-2 text-sm font-semibold">
+            <span className="text-primary">GATE {q.year}</span>
             <span className="text-muted-foreground">•</span>
             <span className="text-muted-foreground">{q.subject}</span>
             <Badge variant="outline">{q.topic}</Badge>
-            <Badge variant="secondary">{q.qtype}</Badge>
-            <Badge variant="outline">{q.marks} mark{q.marks === 1 ? "" : "s"}</Badge>
+            <Badge className={getTypeColor(q.qtype)}>{q.qtype}</Badge>
+            <Badge variant="outline">{q.marks} Mark{q.marks === 1 ? "" : "s"}</Badge>
             <span className="ml-auto text-xs text-muted-foreground">
               {index + 1} / {filtered.length}
             </span>
           </div>
+
+          {/* Image Display */}
+          {(q as ExtendedPyqQuestion).image && (
+            <div className="mt-4 rounded-lg border border-border p-2">
+              <img 
+                src={(q as ExtendedPyqQuestion).image} 
+                alt="Question" 
+                className="max-h-64 rounded object-contain"
+              />
+            </div>
+          )}
 
           <p className="mt-5 whitespace-pre-wrap text-lg font-semibold leading-relaxed">
             {q.question}
@@ -281,6 +347,39 @@ function Solve() {
                 disabled={revealed}
                 placeholder="Numerical answer"
               />
+            </div>
+          ) : isMsq ? (
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              {q.options.map((opt, i) => {
+                const isSelected = msqSelected.includes(i);
+                const isCorrect = revealed && (q as ExtendedPyqQuestion).msq_correct_indices?.includes(i);
+                const isWrong = revealed && isSelected && !(q as ExtendedPyqQuestion).msq_correct_indices?.includes(i);
+                return (
+                  <button
+                    key={i}
+                    onClick={() => !revealed && toggleMsqOption(i)}
+                    className={`rounded-xl border p-4 text-left text-sm transition-colors ${
+                      isCorrect
+                        ? "border-primary bg-primary/10"
+                        : isWrong
+                          ? "border-destructive bg-destructive/10"
+                          : isSelected
+                            ? "border-primary bg-accent"
+                            : "border-border hover:bg-accent"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        checked={isSelected}
+                        disabled={revealed}
+                        className="pointer-events-none"
+                      />
+                      <span className="font-bold text-primary">{LETTERS[i]}.</span>
+                      <span>{opt}</span>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           ) : (
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
@@ -312,18 +411,30 @@ function Solve() {
           {revealed && (
             <div className="mt-5 rounded-xl border border-border bg-background p-4 text-sm">
               <p className="flex items-center gap-2 font-semibold">
-                {(isNat
-                  ? natValue.trim().toLowerCase() === (q.answer_text ?? "").trim().toLowerCase()
-                  : selected === q.correct_index) ? (
-                  <>
-                    <CheckCircle2 className="size-4 text-primary" /> Correct!
-                  </>
-                ) : (
-                  <>
-                    <XCircle className="size-4 text-destructive" /> Correct answer:{" "}
-                    {isNat ? (q.answer_text ?? "—") : LETTERS[q.correct_index]}
-                  </>
-                )}
+                {(() => {
+                  let isCorrect = false;
+                  if (isNat) {
+                    isCorrect = natValue.trim().toLowerCase() === (q.answer_text ?? "").trim().toLowerCase();
+                  } else if (isMsq) {
+                    const correctIndices = (q as ExtendedPyqQuestion).msq_correct_indices || [];
+                    isCorrect = correctIndices.length === msqSelected.length &&
+                      correctIndices.every((v, i) => v === msqSelected[i]);
+                  } else {
+                    isCorrect = selected === q.correct_index;
+                  }
+                  return isCorrect ? (
+                    <>
+                      <CheckCircle2 className="size-4 text-primary" /> Correct! ✅
+                    </>
+                  ) : (
+                    <>
+                      <XCircle className="size-4 text-destructive" /> Correct answer:{" "}
+                      {isNat ? (q.answer_text ?? "—") : 
+                       isMsq ? (q as ExtendedPyqQuestion).msq_correct_indices?.map(i => LETTERS[i]).join(", ") || "—" :
+                       LETTERS[q.correct_index]}
+                    </>
+                  );
+                })()}
               </p>
               {q.explanation && <p className="mt-2 text-muted-foreground">{q.explanation}</p>}
             </div>
@@ -331,7 +442,14 @@ function Solve() {
 
           <div className="mt-6 flex flex-wrap gap-2">
             {!revealed ? (
-              <Button onClick={submit} disabled={isNat ? !natValue.trim() : selected === null}>
+              <Button 
+                onClick={submit} 
+                disabled={
+                  isNat ? !natValue.trim() : 
+                  isMsq ? msqSelected.length === 0 : 
+                  selected === null
+                }
+              >
                 Submit answer
               </Button>
             ) : (
@@ -349,16 +467,25 @@ function Solve() {
 
 function Browse() {
   const questions = useQuery({ queryKey: ["pyq-all"], queryFn: fetchPyqQuestions });
-  const { filtered, controls } = useFilters(questions.data ?? []);
+  const { filtered, controls } = useFilters((questions.data ?? []) as ExtendedPyqQuestion[]);
 
   const groups = useMemo(() => {
-    const map = new Map<string, PyqQuestion[]>();
+    const map = new Map<string, ExtendedPyqQuestion[]>();
     for (const q of filtered) {
       const key = `${q.subject} › ${q.topic}`;
       map.set(key, [...(map.get(key) ?? []), q]);
     }
     return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [filtered]);
+
+  function getTypeColor(type: string) {
+    switch (type) {
+      case "MCQ": return "bg-blue-500";
+      case "MSQ": return "bg-purple-500";
+      case "NAT": return "bg-green-500";
+      default: return "bg-gray-500";
+    }
+  }
 
   return (
     <div className="space-y-5">
@@ -387,8 +514,15 @@ function Browse() {
                   key={q.id}
                   className="rounded-xl border border-border bg-background p-3 text-sm"
                 >
-                  <span className="mr-2 font-semibold text-primary">GATE {q.year}</span>
-                  <span className="text-muted-foreground">{q.question}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-primary">GATE {q.year}</span>
+                    <Badge className={getTypeColor(q.qtype)}>{q.qtype}</Badge>
+                    <Badge variant="outline">{q.marks}M</Badge>
+                  </div>
+                  <span className="mt-1 block text-muted-foreground">{q.question}</span>
+                  {(q as ExtendedPyqQuestion).image && (
+                    <ImageIcon className="mt-1 size-4 text-muted-foreground" />
+                  )}
                 </li>
               ))}
             </ul>
@@ -405,45 +539,79 @@ function ImportPanel() {
   const [paper, setPaper] = useState<string>(PYQ_PAPERS[0]);
   const [subject, setSubject] = useState<string>(PRACTICE_SUBJECTS[0]!);
   const [topic, setTopic] = useState("");
+  const [qtype, setQtype] = useState<QuestionType>("MCQ");
+  const [marks, setMarks] = useState<Marks>(1);
   const [question, setQuestion] = useState("");
   const [optionsText, setOptionsText] = useState("");
   const [correct, setCorrect] = useState("1");
+  const [msqCorrect, setMsqCorrect] = useState("");
   const [answerText, setAnswerText] = useState("");
   const [explanation, setExplanation] = useState("");
   const [bulk, setBulk] = useState("");
+  const [image, setImage] = useState<string | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const options = optionsText
     .split(";;")
     .map((o) => o.trim())
     .filter(Boolean);
 
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64 = reader.result as string;
+        setImage(base64);
+        setImagePreview(base64);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const removeImage = () => {
+    setImage(null);
+    setImagePreview(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
   const addOne = useMutation({
-    mutationFn: () =>
-      addPyqQuestions([
+    mutationFn: () => {
+      const msqCorrectIndices = qtype === "MSQ" 
+        ? msqCorrect.split(",").map(s => parseInt(s.trim()) - 1).filter(n => !isNaN(n) && n >= 0 && n < options.length)
+        : undefined;
+
+      return addPyqQuestions([
         {
           year: Number(year),
           paper,
           subject,
           topic: topic.trim() || "Untagged",
-          qtype: options.length ? "MCQ" : "NAT",
-          marks: 1,
+          qtype,
+          marks,
           question: question.trim(),
           options,
-          correct_index: Math.max(0, Math.min(options.length - 1, Number(correct) - 1)),
-          answer_text: options.length ? null : answerText.trim() || null,
+          correct_index: qtype === "MCQ" ? Math.max(0, Math.min(options.length - 1, Number(correct) - 1)) : 0,
+          msq_correct_indices: msqCorrectIndices,
+          answer_text: qtype === "NAT" ? answerText.trim() || null : null,
           explanation: explanation.trim() || null,
-        },
-      ]),
+          image: image || undefined,
+        } as any,
+      ]);
+    },
     onSuccess: () => {
       setQuestion("");
       setOptionsText("");
       setAnswerText("");
       setExplanation("");
-      toast.success("Question added");
+      setImage(null);
+      setImagePreview(null);
+      toast.success("Question added successfully!");
       qc.invalidateQueries({ queryKey: ["pyq-all"] });
       qc.invalidateQueries({ queryKey: ["pyq-mine"] });
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(e.message || "Failed to add question"),
   });
 
   const importBulk = useMutation({
@@ -462,14 +630,17 @@ function ImportPanel() {
     onError: (e: Error) => toast.error(e.message || "Import failed"),
   });
 
+  const isFormValid = question.trim().length >= 5 && topic.trim().length > 0;
+
   return (
     <div className="space-y-6">
       <div className="rounded-2xl border border-border bg-card p-6">
         <h2 className="text-xl font-extrabold text-primary">Add a PYQ</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Leave options empty for a NAT question and fill the numeric answer instead.
+          Fill in the details below to add a new PYQ question.
         </p>
 
+        {/* Basic Info */}
         <div className="mt-5 grid gap-3 sm:grid-cols-4">
           <SimpleSelect value={year} onChange={setYear} options={PYQ_YEARS.map(String)} />
           <SimpleSelect value={paper} onChange={setPaper} options={PYQ_PAPERS} />
@@ -481,24 +652,89 @@ function ImportPanel() {
           />
         </div>
 
-        <div className="mt-4 space-y-3">
+        {/* Question Type & Marks */}
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <SimpleSelect 
+            value={qtype} 
+            onChange={(v) => setQtype(v as QuestionType)} 
+            options={QUESTION_TYPES} 
+          />
+          <SimpleSelect 
+            value={String(marks)} 
+            onChange={(v) => setMarks(Number(v) as Marks)} 
+            options={MARKS_OPTIONS.map(String)} 
+          />
+        </div>
+
+        {/* Image Upload */}
+        <div className="mt-4">
+          <Label>Image (optional)</Label>
+          <div className="mt-2 flex items-center gap-4">
+            <Button
+              variant="outline"
+              onClick={() => fileInputRef.current?.click()}
+              type="button"
+            >
+              <ImagePlus className="mr-2 h-4 w-4" />
+              Upload Image
+            </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleImageUpload}
+            />
+            {imagePreview && (
+              <div className="relative inline-block">
+                <img 
+                  src={imagePreview} 
+                  alt="Preview" 
+                  className="h-16 w-16 rounded-lg object-cover border border-border"
+                />
+                <button
+                  onClick={removeImage}
+                  className="absolute -right-1 -top-1 rounded-full bg-destructive p-0.5 text-white hover:bg-destructive/80"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Question Text */}
+        <div className="mt-4">
           <Textarea
             rows={4}
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             placeholder="Question text..."
           />
+        </div>
+
+        {/* Options */}
+        <div className="mt-4">
           <Textarea
             rows={3}
             value={optionsText}
             onChange={(e) => setOptionsText(e.target.value)}
             placeholder="Options separated by ;; (leave blank for NAT)"
           />
-          {options.length ? (
-            <div className="grid gap-2 sm:max-w-xs">
-              <Label htmlFor="pyq-correct">Correct option number</Label>
+          {options.length > 0 && (
+            <div className="mt-2 text-xs text-muted-foreground">
+              {options.length} option{options.length === 1 ? "" : "s"} detected
+            </div>
+          )}
+        </div>
+
+        {/* Correct Answer */}
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          {qtype === "MCQ" && options.length > 0 && (
+            <div>
+              <Label htmlFor="mcq-correct">Correct option number</Label>
               <Input
-                id="pyq-correct"
+                id="mcq-correct"
                 type="number"
                 min={1}
                 max={Math.max(options.length, 1)}
@@ -506,41 +742,58 @@ function ImportPanel() {
                 onChange={(e) => setCorrect(e.target.value)}
               />
             </div>
-          ) : (
-            <div className="grid gap-2 sm:max-w-xs">
-              <Label htmlFor="pyq-answer">Numeric answer</Label>
+          )}
+          {qtype === "MSQ" && options.length > 0 && (
+            <div>
+              <Label htmlFor="msq-correct">Correct option numbers (comma separated)</Label>
               <Input
-                id="pyq-answer"
+                id="msq-correct"
+                value={msqCorrect}
+                onChange={(e) => setMsqCorrect(e.target.value)}
+                placeholder="e.g. 1,3,4"
+              />
+            </div>
+          )}
+          {qtype === "NAT" && (
+            <div>
+              <Label htmlFor="nat-answer">Numeric answer</Label>
+              <Input
+                id="nat-answer"
                 value={answerText}
                 onChange={(e) => setAnswerText(e.target.value)}
                 placeholder="e.g. 12.5"
               />
             </div>
           )}
+        </div>
+
+        {/* Explanation */}
+        <div className="mt-4">
           <Textarea
             rows={3}
             value={explanation}
             onChange={(e) => setExplanation(e.target.value)}
             placeholder="Explanation (optional)"
           />
-          <Button
-            className="w-full"
-            disabled={question.trim().length < 5 || addOne.isPending}
-            onClick={() => addOne.mutate()}
-          >
-            Add question
-          </Button>
         </div>
+
+        <Button
+          className="mt-4 w-full"
+          disabled={!isFormValid || addOne.isPending}
+          onClick={() => addOne.mutate()}
+        >
+          Add question
+        </Button>
       </div>
 
+      {/* Bulk Import */}
       <div className="rounded-2xl border border-border bg-card p-6">
         <h2 className="text-lg font-bold">Bulk import</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Paste a JSON array, or one question per line as:
+          Paste one question per line as:
           <br />
           <code className="text-xs">
-            year | subject | topic | question | optA ;; optB ;; optC ;; optD | correctNumber |
-            explanation
+            year | subject | topic | qtype | marks | question | optA ;; optB ;; optC ;; optD | correctNumber | explanation
           </code>
         </p>
         <Textarea
@@ -548,7 +801,7 @@ function ImportPanel() {
           rows={8}
           value={bulk}
           onChange={(e) => setBulk(e.target.value)}
-          placeholder={`2015 | Algorithms | Sorting | Worst case of quicksort? | O(n) ;; O(n log n) ;; O(n^2) ;; O(1) | 3 | Pivot always smallest/largest`}
+          placeholder={`2015 | Algorithms | Sorting | MCQ | 1 | Worst case of quicksort? | O(n) ;; O(n log n) ;; O(n^2) ;; O(1) | 3 | Pivot always smallest/largest`}
         />
         <Button
           className="mt-3"
@@ -598,6 +851,15 @@ function MyPyqs() {
     },
   });
 
+  function getTypeColor(type: string) {
+    switch (type) {
+      case "MCQ": return "bg-blue-500";
+      case "MSQ": return "bg-purple-500";
+      case "NAT": return "bg-green-500";
+      default: return "bg-gray-500";
+    }
+  }
+
   return (
     <div className="rounded-2xl border border-border bg-card p-6">
       <h2 className="text-lg font-bold">Your PYQ uploads</h2>
@@ -611,9 +873,20 @@ function MyPyqs() {
             className="flex items-start gap-3 rounded-xl border border-border bg-background p-4"
           >
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold">{q.question}</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                GATE {q.year} • {q.subject} • {q.topic} • {q.qtype}
+              <div className="flex items-center gap-2">
+                <p className="truncate text-sm font-semibold">{q.question}</p>
+                {(q as ExtendedPyqQuestion).image && (
+                  <ImageIcon className="size-4 text-muted-foreground" />
+                )}
+              </div>
+              <p className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                <span>GATE {q.year}</span>
+                <span>•</span>
+                <span>{q.subject}</span>
+                <span>•</span>
+                <span>{q.topic}</span>
+                <Badge className={getTypeColor(q.qtype)}>{q.qtype}</Badge>
+                <Badge variant="outline">{q.marks}M</Badge>
               </p>
             </div>
             <Button variant="ghost" size="sm" onClick={() => remove.mutate(q.id)}>
