@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.15"
+    PostgrestVersion: "14.5"
   }
   public: {
     Tables: {
@@ -82,6 +82,98 @@ export type Database = {
           },
         ]
       }
+      practice_attempts: {
+        Row: {
+          created_at: string
+          id: string
+          is_correct: boolean
+          question_id: string
+          selected_index: number | null
+          skipped: boolean
+          time_taken_secs: number | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_correct?: boolean
+          question_id: string
+          selected_index?: number | null
+          skipped?: boolean
+          time_taken_secs?: number | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_correct?: boolean
+          question_id?: string
+          selected_index?: number | null
+          skipped?: boolean
+          time_taken_secs?: number | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "practice_attempts_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "practice_questions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      practice_questions: {
+        Row: {
+          author_name: string | null
+          correct_index: number
+          created_at: string
+          difficulty: string
+          explanation: string | null
+          id: string
+          options: string[]
+          qtype: string
+          question: string
+          status: string
+          subject: string
+          tag: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          author_name?: string | null
+          correct_index?: number
+          created_at?: string
+          difficulty?: string
+          explanation?: string | null
+          id?: string
+          options?: string[]
+          qtype?: string
+          question: string
+          status?: string
+          subject?: string
+          tag?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          author_name?: string | null
+          correct_index?: number
+          created_at?: string
+          difficulty?: string
+          explanation?: string | null
+          id?: string
+          options?: string[]
+          qtype?: string
+          question?: string
+          status?: string
+          subject?: string
+          tag?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           about_me: string | null
@@ -124,6 +216,104 @@ export type Database = {
           updated_at?: string
           user_id?: string
           username?: string | null
+        }
+        Relationships: []
+      }
+      pyq_attempts: {
+        Row: {
+          answer_text: string | null
+          created_at: string
+          id: string
+          is_correct: boolean
+          question_id: string
+          selected_index: number | null
+          skipped: boolean
+          time_taken_secs: number | null
+          user_id: string
+        }
+        Insert: {
+          answer_text?: string | null
+          created_at?: string
+          id?: string
+          is_correct?: boolean
+          question_id: string
+          selected_index?: number | null
+          skipped?: boolean
+          time_taken_secs?: number | null
+          user_id: string
+        }
+        Update: {
+          answer_text?: string | null
+          created_at?: string
+          id?: string
+          is_correct?: boolean
+          question_id?: string
+          selected_index?: number | null
+          skipped?: boolean
+          time_taken_secs?: number | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pyq_attempts_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "pyq_questions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pyq_questions: {
+        Row: {
+          answer_text: string | null
+          correct_index: number
+          created_at: string
+          explanation: string | null
+          id: string
+          marks: number
+          options: string[]
+          paper: string
+          qtype: string
+          question: string
+          subject: string
+          topic: string
+          updated_at: string
+          user_id: string
+          year: number
+        }
+        Insert: {
+          answer_text?: string | null
+          correct_index?: number
+          created_at?: string
+          explanation?: string | null
+          id?: string
+          marks?: number
+          options?: string[]
+          paper?: string
+          qtype?: string
+          question: string
+          subject?: string
+          topic?: string
+          updated_at?: string
+          user_id: string
+          year?: number
+        }
+        Update: {
+          answer_text?: string | null
+          correct_index?: number
+          created_at?: string
+          explanation?: string | null
+          id?: string
+          marks?: number
+          options?: string[]
+          paper?: string
+          qtype?: string
+          question?: string
+          subject?: string
+          topic?: string
+          updated_at?: string
+          user_id?: string
+          year?: number
         }
         Relationships: []
       }
@@ -444,7 +634,17 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      practice_leaderboard: {
+        Args: never
+        Returns: {
+          accuracy: number
+          attempts: number
+          contributed: number
+          display_name: string
+          solved: number
+          user_id: string
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never

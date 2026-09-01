@@ -5,13 +5,16 @@ import {
   Brain,
   CheckCircle2,
   Clock,
+  Pencil,
   Search,
   SkipForward,
   Send,
+  Sparkles,
   Trash2,
   Trophy,
   XCircle,
 } from "lucide-react";
+import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -40,8 +43,13 @@ import {
   fetchProfile,
   recordAttempt,
   submitQuestion,
+  submitQuestions,
   type PracticeQuestion,
 } from "@/lib/data";
+import {
+  formatQuestionsWithAI,
+  type AiDraftQuestion,
+} from "@/lib/practice-ai.functions";
 
 export const Route = createFileRoute("/_authenticated/practice")({
   head: () => ({
@@ -282,6 +290,40 @@ function FilterSelect({
 }
 
 function Contribute() {
+  const [mode, setMode] = useState<"manual" | "ai">("manual");
+
+  return (
+    <div className="rounded-2xl border border-border bg-card p-6">
+      <h2 className="text-xl font-extrabold text-primary">Contribute a Question!</h2>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Questions you add go live in the shared Practice Arena for every aspirant.
+      </p>
+
+      <div className="mt-4 grid grid-cols-2 gap-2 rounded-xl border border-border bg-background p-1">
+        <button
+          onClick={() => setMode("manual")}
+          className={`rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
+            mode === "manual" ? "bg-accent text-foreground" : "text-muted-foreground"
+          }`}
+        >
+          <Pencil className="mr-2 inline size-4" /> Manual Entry
+        </button>
+        <button
+          onClick={() => setMode("ai")}
+          className={`rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
+            mode === "ai" ? "bg-primary text-primary-foreground" : "text-muted-foreground"
+          }`}
+        >
+          <Sparkles className="mr-2 inline size-4" /> Use AI to Submit
+        </button>
+      </div>
+
+      <div className="mt-5">{mode === "manual" ? <ManualEntry /> : <AiEntry />}</div>
+    </div>
+  );
+}
+
+function ManualEntry() {
   const qc = useQueryClient();
   const profile = useQuery({ queryKey: ["profile"], queryFn: fetchProfile });
   const [subject, setSubject] = useState<string>(PRACTICE_SUBJECTS[0]);
@@ -315,8 +357,9 @@ function Contribute() {
       setQuestion("");
       setOptionsText("");
       setExplanation("");
-      toast.success("Submitted for review");
+      toast.success("Question published to the arena");
       qc.invalidateQueries({ queryKey: ["practice-mine"] });
+      qc.invalidateQueries({ queryKey: ["practice-approved"] });
     },
     onError: () => toast.error("Could not submit question"),
   });
@@ -324,13 +367,8 @@ function Contribute() {
   const valid = question.trim().length > 5 && options.length >= 2;
 
   return (
-    <div className="rounded-2xl border border-border bg-card p-6">
-      <h2 className="text-xl font-extrabold text-primary">Contribute a Question!</h2>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Help build the practice database. All questions are reviewed before going live.
-      </p>
-
-      <div className="mt-5 grid gap-3 sm:grid-cols-4">
+    <div>
+      <div className="grid gap-3 sm:grid-cols-4">
         <PickerSelect value={subject} onChange={setSubject} options={PRACTICE_SUBJECTS} />
         <PickerSelect value={qtype} onChange={setQtype} options={PRACTICE_TYPES} />
         <PickerSelect value={difficulty} onChange={setDifficulty} options={PRACTICE_LEVELS} />
@@ -368,9 +406,129 @@ function Contribute() {
           placeholder="Explanation (Optional)"
         />
         <Button className="w-full" disabled={!valid || send.isPending} onClick={() => send.mutate()}>
-          <Send className="mr-2 size-4" /> Submit for Review
+          <Send className="mr-2 size-4" /> Publish question
         </Button>
       </div>
+    </div>
+  );
+}
+
+function AiEntry() {
+  const qc = useQueryClient();
+  const profile = useQuery({ queryKey: ["profile"], queryFn: fetchProfile });
+  const format = useServerFn(formatQuestionsWithAI);
+
+  const [defaultSubject, setDefaultSubject] = useState<string>(PRACTICE_SUBJECTS[0]);
+  const [tag, setTag] = useState<string>("Untagged");
+  const [raw, setRaw] = useState("");
+  const [drafts, setDrafts] = useState<AiDraftQuestion[]>([]);
+
+  const parse = useMutation({
+    mutationFn: async () => {
+      const res = await format({ data: { rawText: raw, defaultSubject } });
+      return res.questions;
+    },
+    onSuccess: (questions) => {
+      setDrafts(questions);
+      toast.success(`Parsed ${questions.length} question${questions.length === 1 ? "" : "s"}`);
+    },
+    onError: (e: Error) => toast.error(e.message || "AI could not parse that"),
+  });
+
+  const publish = useMutation({
+    mutationFn: () =>
+      submitQuestions(
+        drafts.map((d) => ({
+          subject: d.subject,
+          qtype: d.qtype,
+          difficulty: d.difficulty,
+          tag,
+          question: d.question,
+          options: d.options,
+          correct_index: d.correct_index,
+          explanation: d.explanation,
+          author_name: profile.data?.display_name ?? null,
+        })),
+      ),
+    onSuccess: (n) => {
+      setDrafts([]);
+      setRaw("");
+      toast.success(`Published ${n} question${n === 1 ? "" : "s"}`);
+      qc.invalidateQueries({ queryKey: ["practice-mine"] });
+      qc.invalidateQueries({ queryKey: ["practice-approved"] });
+    },
+    onError: (e: Error) => toast.error(e.message || "Could not publish"),
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-2">
+          <Label>Default subject (used if unclear)</Label>
+          <PickerSelect value={defaultSubject} onChange={setDefaultSubject} options={PRACTICE_SUBJECTS} />
+        </div>
+        <div className="grid gap-2">
+          <Label>Tag for all submitted questions</Label>
+          <PickerSelect value={tag} onChange={setTag} options={PRACTICE_TAGS} />
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-border bg-background p-4 text-sm">
+        <p className="font-semibold">How it works</p>
+        <ol className="mt-2 list-decimal space-y-1 pl-5 text-muted-foreground">
+          <li>Paste your raw question(s) — text, options and answer in any format.</li>
+          <li>AI formats them into subject, type, difficulty, options and explanation.</li>
+          <li>Review the preview, then publish them to the arena.</li>
+        </ol>
+      </div>
+
+      <Textarea
+        rows={7}
+        value={raw}
+        onChange={(e) => setRaw(e.target.value)}
+        placeholder={`Paste raw questions here, e.g.\n\nWhich normal form removes transitive dependency?\nA) 1NF B) 2NF C) 3NF D) BCNF\nAnswer: C`}
+      />
+
+      <Button disabled={raw.trim().length < 10 || parse.isPending} onClick={() => parse.mutate()}>
+        <Sparkles className="mr-2 size-4" />
+        {parse.isPending ? "Formatting with AI…" : "Format with AI"}
+      </Button>
+
+      {drafts.length > 0 && (
+        <div className="space-y-3">
+          <p className="text-sm font-semibold">Preview ({drafts.length})</p>
+          {drafts.map((d, i) => (
+            <div key={i} className="rounded-xl border border-border bg-background p-4 text-sm">
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <Badge variant="secondary">{d.subject}</Badge>
+                <Badge variant="outline">{d.qtype}</Badge>
+                <Badge variant="outline">{d.difficulty}</Badge>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="ml-auto"
+                  onClick={() => setDrafts((prev) => prev.filter((_, j) => j !== i))}
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
+              <p className="mt-2 font-semibold">{d.question}</p>
+              <ul className="mt-2 space-y-1 text-muted-foreground">
+                {d.options.map((o, j) => (
+                  <li key={j} className={j === d.correct_index ? "font-semibold text-primary" : ""}>
+                    {LETTERS[j]}. {o}
+                  </li>
+                ))}
+              </ul>
+              {d.explanation && <p className="mt-2 text-xs text-muted-foreground">{d.explanation}</p>}
+            </div>
+          ))}
+          <Button className="w-full" disabled={publish.isPending} onClick={() => publish.mutate()}>
+            <Send className="mr-2 size-4" /> Publish {drafts.length} question
+            {drafts.length === 1 ? "" : "s"} to the arena
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

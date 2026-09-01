@@ -518,7 +518,7 @@ export async function fetchMyQuestions(): Promise<PracticeQuestion[]> {
   ) ?? []) as PracticeQuestion[];
 }
 
-export async function submitQuestion(input: {
+export type QuestionInput = {
   subject: string;
   qtype: string;
   difficulty: string;
@@ -528,15 +528,26 @@ export async function submitQuestion(input: {
   correct_index: number;
   explanation?: string;
   author_name?: string | null;
-}) {
+};
+
+export async function submitQuestion(input: QuestionInput) {
   const user_id = await getUserId();
   return unwrap(
     await supabase
       .from("practice_questions")
-      .insert({ ...input, user_id, status: "pending" } as never)
+      .insert({ ...input, user_id, status: "approved" } as never)
       .select("*")
       .single(),
   );
+}
+
+export async function submitQuestions(rows: QuestionInput[]) {
+  const user_id = await getUserId();
+  const { error } = await supabase
+    .from("practice_questions")
+    .insert(rows.map((r) => ({ ...r, user_id, status: "approved" })) as never);
+  if (error) throw new Error(error.message);
+  return rows.length;
 }
 
 export async function deleteQuestion(id: string) {
