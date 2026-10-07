@@ -87,8 +87,10 @@ export type Database = {
           created_at: string
           id: string
           is_correct: boolean
+          nat_input: string | null
           question_id: string
           selected_index: number | null
+          selected_indices: number[] | null
           skipped: boolean
           time_taken_secs: number | null
           user_id: string
@@ -97,8 +99,10 @@ export type Database = {
           created_at?: string
           id?: string
           is_correct?: boolean
+          nat_input?: string | null
           question_id: string
           selected_index?: number | null
+          selected_indices?: number[] | null
           skipped?: boolean
           time_taken_secs?: number | null
           user_id: string
@@ -107,8 +111,10 @@ export type Database = {
           created_at?: string
           id?: string
           is_correct?: boolean
+          nat_input?: string | null
           question_id?: string
           selected_index?: number | null
+          selected_indices?: number[] | null
           skipped?: boolean
           time_taken_secs?: number | null
           user_id?: string
@@ -127,10 +133,13 @@ export type Database = {
         Row: {
           author_name: string | null
           correct_index: number
+          correct_indices: number[] | null
           created_at: string
           difficulty: string
           explanation: string | null
           id: string
+          image_path: string | null
+          nat_answer: string | null
           options: string[]
           qtype: string
           question: string
@@ -143,10 +152,13 @@ export type Database = {
         Insert: {
           author_name?: string | null
           correct_index?: number
+          correct_indices?: number[] | null
           created_at?: string
           difficulty?: string
           explanation?: string | null
           id?: string
+          image_path?: string | null
+          nat_answer?: string | null
           options?: string[]
           qtype?: string
           question: string
@@ -159,10 +171,13 @@ export type Database = {
         Update: {
           author_name?: string | null
           correct_index?: number
+          correct_indices?: number[] | null
           created_at?: string
           difficulty?: string
           explanation?: string | null
           id?: string
+          image_path?: string | null
+          nat_answer?: string | null
           options?: string[]
           qtype?: string
           question?: string

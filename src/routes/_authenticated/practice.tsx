@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
+import { FileText } from "lucide-react";
+import { PracticePdfImporter } from "@/components/PracticePdfImporter";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,6 +44,10 @@ import {
   fetchMyQuestions,
   fetchProfile,
   recordAttempt,
+  checkNatAnswer,
+  practiceCorrectSet,
+  pyqImageUrl,
+  uploadPyqImage,
   submitQuestion,
   submitQuestions,
   type PracticeQuestion,
@@ -106,6 +112,12 @@ function PracticePage() {
   );
 }
 
+function PracticeImage({ path }: { path: string }) {
+  const url = useQuery({ queryKey: ["pyq-img", path], queryFn: () => pyqImageUrl(path), staleTime: 50 * 60 * 1000 });
+  if (!url.data) return <div className="mt-4 h-32 animate-pulse rounded-xl bg-muted" />;
+  return <img src={url.data} alt="Question figure" className="mt-4 max-h-96 rounded-xl border border-border bg-background object-contain" />;
+}
+
 function Arena() {
   const qc = useQueryClient();
   const questions = useQuery({ queryKey: ["practice-approved"], queryFn: fetchPracticeQuestions });
@@ -115,8 +127,10 @@ function Arena() {
   const [level, setLevel] = useState("all");
   const [tag, setTag] = useState("all");
   const [index, setIndex] = useState(0);
-  const [selected, setSelected] = useState<number | null>(null);
+  const [selected, setSelected] = useState<number[]>([]);
+  const [natInput, setNatInput] = useState("");
   const [revealed, setRevealed] = useState(false);
+  const [lastCorrect, setLastCorrect] = useState(false);
 
   const list = useMemo(() => {
     const all = questions.data ?? [];
@@ -128,10 +142,15 @@ function Arena() {
     );
   }, [questions.data, subject, level, tag]);
 
+  // One result per question: the latest non-skipped attempt.
   const stats = useMemo(() => {
-    const rows = attempts.data ?? [];
-    const solved = rows.filter((a) => a.is_correct).length;
-    const tried = rows.filter((a) => !a.skipped).length;
+    const latest = new Map<string, boolean>();
+    for (const a of attempts.data ?? []) {
+      if (a.skipped || latest.has(a.question_id)) continue;
+      latest.set(a.question_id, a.is_correct);
+    }
+    const tried = latest.size;
+    const solved = [...latest.values()].filter(Boolean).length;
     return { solved, tried, pct: tried ? Math.round((solved / tried) * 100) : 0 };
   }, [attempts.data]);
 
@@ -141,20 +160,39 @@ function Arena() {
   });
 
   const q: PracticeQuestion | undefined = list[index];
+  const isNat = !!q && (q.qtype === "NAT" || q.options.length === 0);
+  const isMsq = !!q && q.qtype === "MSQ";
+  const correctSet = q ? practiceCorrectSet(q) : [];
 
   function next() {
-    setSelected(null);
+    setSelected([]);
+    setNatInput("");
     setRevealed(false);
     setIndex((i) => (list.length ? (i + 1) % list.length : 0));
   }
 
+  function choose(i: number) {
+    if (revealed) return;
+    setSelected((s) => (isMsq ? (s.includes(i) ? s.filter((x) => x !== i) : [...s, i].sort()) : [i]));
+  }
+
   function submit() {
-    if (!q || selected === null) return;
+    if (!q) return;
+    let ok: boolean;
+    if (isNat) ok = checkNatAnswer(natInput, q.nat_answer);
+    else {
+      const a = [...selected].sort().join(",");
+      const b = [...correctSet].sort().join(",");
+      ok = a === b;
+    }
+    setLastCorrect(ok);
     setRevealed(true);
     save.mutate({
       question_id: q.id,
-      selected_index: selected,
-      is_correct: selected === q.correct_index,
+      selected_index: isNat ? null : (selected[0] ?? null),
+      selected_indices: isNat ? null : selected,
+      nat_input: isNat ? natInput.trim() : null,
+      is_correct: ok,
       skipped: false,
     });
   }
@@ -163,6 +201,8 @@ function Arena() {
     if (q) save.mutate({ question_id: q.id, selected_index: null, is_correct: false, skipped: true });
     next();
   }
+
+  const canSubmit = isNat ? natInput.trim() !== "" : selected.length > 0;
 
   return (
     <div className="space-y-5">
@@ -186,63 +226,82 @@ function Arena() {
           <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-primary">
             <span>{q.subject}</span>
             <span className="text-muted-foreground">•</span>
-            <span className="text-muted-foreground">{q.qtype}</span>
+            <span className="text-muted-foreground">{isNat ? "NAT" : q.qtype}</span>
             <Badge variant="secondary">Q.{index + 1}</Badge>
             <Badge variant="outline">{q.tag}</Badge>
             <Badge variant="outline">{q.difficulty}</Badge>
-            {q.author_name && (
-              <span className="text-xs text-muted-foreground">By: {q.author_name}</span>
-            )}
+            {q.author_name && <span className="text-xs text-muted-foreground">By: {q.author_name}</span>}
           </div>
 
-          <p className="mt-5 text-lg font-semibold leading-relaxed">{q.question}</p>
+          <p className="mt-5 whitespace-pre-wrap text-lg font-semibold leading-relaxed">{q.question}</p>
+          {q.image_path && <PracticeImage path={q.image_path} />}
+          {isMsq && !revealed && (
+            <p className="mt-3 text-xs text-muted-foreground">Select all correct options.</p>
+          )}
 
-          <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            {q.options.map((opt, i) => {
-              const correct = revealed && i === q.correct_index;
-              const wrong = revealed && i === selected && i !== q.correct_index;
-              return (
-                <button
-                  key={i}
-                  onClick={() => !revealed && setSelected(i)}
-                  className={`rounded-xl border p-4 text-left text-sm transition-colors ${
-                    correct
-                      ? "border-primary bg-primary/10"
-                      : wrong
-                        ? "border-destructive bg-destructive/10"
-                        : selected === i
-                          ? "border-primary bg-accent"
-                          : "border-border hover:bg-accent"
-                  }`}
-                >
-                  <span className="mr-2 font-bold text-primary">{LETTERS[i]}.</span>
-                  {opt}
-                </button>
-              );
-            })}
-          </div>
+          {isNat ? (
+            <div className="mt-5 max-w-xs">
+              <Label htmlFor="nat-answer">Your answer</Label>
+              <Input
+                id="nat-answer"
+                inputMode="decimal"
+                value={natInput}
+                disabled={revealed}
+                onChange={(e) => setNatInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && canSubmit && !revealed && submit()}
+                placeholder="e.g. 12.5"
+              />
+            </div>
+          ) : (
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              {q.options.map((opt, i) => {
+                const isPicked = selected.includes(i);
+                const correct = revealed && correctSet.includes(i);
+                const wrong = revealed && isPicked && !correctSet.includes(i);
+                return (
+                  <button
+                    key={i}
+                    onClick={() => choose(i)}
+                    aria-pressed={isPicked}
+                    className={`rounded-xl border p-4 text-left text-sm transition-colors ${
+                      correct
+                        ? "border-primary bg-primary/10"
+                        : wrong
+                          ? "border-destructive bg-destructive/10"
+                          : isPicked
+                            ? "border-primary bg-accent"
+                            : "border-border hover:bg-accent"
+                    }`}
+                  >
+                    <span className="mr-2 font-bold text-primary">{LETTERS[i]}.</span>
+                    {opt}
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {revealed && (
             <div className="mt-5 rounded-xl border border-border bg-background p-4 text-sm">
               <p className="flex items-center gap-2 font-semibold">
-                {selected === q.correct_index ? (
+                {lastCorrect ? (
                   <>
                     <CheckCircle2 className="size-4 text-primary" /> Correct!
                   </>
                 ) : (
                   <>
                     <XCircle className="size-4 text-destructive" /> Correct answer:{" "}
-                    {LETTERS[q.correct_index]}
+                    {isNat ? (q.nat_answer ?? "—") : correctSet.map((i) => LETTERS[i]).join(", ")}
                   </>
                 )}
               </p>
-              {q.explanation && <p className="mt-2 text-muted-foreground">{q.explanation}</p>}
+              {q.explanation && <p className="mt-2 whitespace-pre-wrap text-muted-foreground">{q.explanation}</p>}
             </div>
           )}
 
           <div className="mt-6 flex flex-wrap gap-2">
             {!revealed ? (
-              <Button onClick={submit} disabled={selected === null}>
+              <Button onClick={submit} disabled={!canSubmit}>
                 Submit answer
               </Button>
             ) : (
@@ -290,7 +349,7 @@ function FilterSelect({
 }
 
 function Contribute() {
-  const [mode, setMode] = useState<"manual" | "ai">("manual");
+  const [mode, setMode] = useState<"manual" | "ai" | "pdf">("manual");
 
   return (
     <div className="rounded-2xl border border-border bg-card p-6">
@@ -299,26 +358,27 @@ function Contribute() {
         Questions you add go live in the shared Practice Arena for every aspirant.
       </p>
 
-      <div className="mt-4 grid grid-cols-2 gap-2 rounded-xl border border-border bg-background p-1">
-        <button
-          onClick={() => setMode("manual")}
-          className={`rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
-            mode === "manual" ? "bg-accent text-foreground" : "text-muted-foreground"
-          }`}
-        >
-          <Pencil className="mr-2 inline size-4" /> Manual Entry
-        </button>
-        <button
-          onClick={() => setMode("ai")}
-          className={`rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
-            mode === "ai" ? "bg-primary text-primary-foreground" : "text-muted-foreground"
-          }`}
-        >
-          <Sparkles className="mr-2 inline size-4" /> Use AI to Submit
-        </button>
+      <div className="mt-4 grid grid-cols-3 gap-2 rounded-xl border border-border bg-background p-1">
+        {([
+          ["manual", "Manual Entry", Pencil],
+          ["ai", "Use AI to Submit", Sparkles],
+          ["pdf", "Import PDF", FileText],
+        ] as const).map(([m, label, Icon]) => (
+          <button
+            key={m}
+            onClick={() => setMode(m)}
+            className={`rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
+              mode === m ? "bg-primary text-primary-foreground" : "text-muted-foreground"
+            }`}
+          >
+            <Icon className="mr-2 inline size-4" /> {label}
+          </button>
+        ))}
       </div>
 
-      <div className="mt-5">{mode === "manual" ? <ManualEntry /> : <AiEntry />}</div>
+      <div className="mt-5">
+        {mode === "manual" ? <ManualEntry /> : mode === "ai" ? <AiEntry /> : <PracticePdfImporter />}
+      </div>
     </div>
   );
 }
@@ -334,6 +394,8 @@ function ManualEntry() {
   const [optionsText, setOptionsText] = useState("");
   const [correct, setCorrect] = useState("1");
   const [explanation, setExplanation] = useState("");
+  const [image, setImage] = useState<File | null>(null);
+  const isNat = qtype === "NAT";
 
   const options = optionsText
     .split(";;")
@@ -341,19 +403,29 @@ function ManualEntry() {
     .filter(Boolean);
 
   const send = useMutation({
-    mutationFn: () =>
-      submitQuestion({
+    mutationFn: async () => {
+      const idx = correct
+        .split(/[,\s]+/)
+        .map((n) => Number(n) - 1)
+        .filter((n) => Number.isInteger(n) && n >= 0 && n < options.length);
+      const image_path = image ? await uploadPyqImage(image) : null;
+      return submitQuestion({
         subject,
         qtype,
         difficulty,
         tag,
         question: question.trim(),
-        options,
-        correct_index: Math.max(0, Math.min(options.length - 1, Number(correct) - 1)),
+        options: isNat ? [] : options,
+        correct_index: isNat ? 0 : (idx[0] ?? 0),
+        correct_indices: isNat ? null : [...new Set(idx)].sort(),
+        nat_answer: isNat ? correct.trim() : null,
+        image_path,
         explanation: explanation.trim(),
         author_name: profile.data?.display_name ?? null,
-      }),
+      });
+    },
     onSuccess: () => {
+      setImage(null);
       setQuestion("");
       setOptionsText("");
       setExplanation("");
@@ -364,7 +436,7 @@ function ManualEntry() {
     onError: () => toast.error("Could not submit question"),
   });
 
-  const valid = question.trim().length > 5 && options.length >= 2;
+  const valid = question.trim().length > 5 && (isNat ? correct.trim() !== "" : options.length >= 2);
 
   return (
     <div>
@@ -382,22 +454,23 @@ function ManualEntry() {
           onChange={(e) => setQuestion(e.target.value)}
           placeholder="Type your question here..."
         />
-        <Textarea
-          rows={3}
-          value={optionsText}
-          onChange={(e) => setOptionsText(e.target.value)}
-          placeholder="Options separated by ;; (e.g. O(1) ;; O(n) ;; O(n^2))"
-        />
-        <div className="grid gap-2 sm:max-w-xs">
-          <Label htmlFor="correct">Correct option number</Label>
-          <Input
-            id="correct"
-            type="number"
-            min={1}
-            max={Math.max(options.length, 1)}
-            value={correct}
-            onChange={(e) => setCorrect(e.target.value)}
+        <div className="grid gap-2 sm:max-w-sm">
+          <Label htmlFor="q-image">Picture (optional)</Label>
+          <Input id="q-image" type="file" accept="image/*" onChange={(e) => setImage(e.target.files?.[0] ?? null)} />
+        </div>
+        {!isNat && (
+          <Textarea
+            rows={3}
+            value={optionsText}
+            onChange={(e) => setOptionsText(e.target.value)}
+            placeholder="Options separated by ;; (e.g. O(1) ;; O(n) ;; O(n^2))"
           />
+        )}
+        <div className="grid gap-2 sm:max-w-xs">
+          <Label htmlFor="correct">
+            {isNat ? "Answer (number or range, e.g. 12.5 or 4.0 to 4.2)" : qtype === "MSQ" ? "Correct option numbers (e.g. 2,4)" : "Correct option number"}
+          </Label>
+          <Input id="correct" value={correct} onChange={(e) => setCorrect(e.target.value)} />
         </div>
         <Textarea
           rows={3}

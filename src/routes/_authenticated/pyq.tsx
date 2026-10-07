@@ -33,6 +33,8 @@ import {
   PYQ_TYPES,
   PYQ_YEARS,
   addPyqQuestions,
+  checkNatAnswer,
+  latestPyqResults,
   deletePyqQuestion,
   fetchMyPyqAttempts,
   fetchMyPyqQuestions,
@@ -43,6 +45,7 @@ import {
   uploadPyqImage,
   type PyqQuestion,
 } from "@/lib/data";
+import { PyqPdfImporter } from "@/components/PyqPdfImporter";
 
 export const Route = createFileRoute("/_authenticated/pyq")({
   head: () => ({
@@ -98,6 +101,7 @@ function PyqPage() {
           <Browse />
         </TabsContent>
         <TabsContent value="import" className="space-y-6">
+          <PyqPdfImporter />
           <ImportPanel />
           <MyPyqs />
         </TabsContent>
@@ -231,9 +235,9 @@ function Solve() {
   const [revealed, setRevealed] = useState(false);
 
   const stats = useMemo(() => {
-    const rows = attempts.data ?? [];
-    const solved = rows.filter((a) => a.is_correct).length;
-    const tried = rows.filter((a) => !a.skipped).length;
+    const latest = [...latestPyqResults(attempts.data ?? []).values()];
+    const solved = latest.filter((a) => a.is_correct).length;
+    const tried = latest.length;
     return { solved, tried, pct: tried ? Math.round((solved / tried) * 100) : 0 };
   }, [attempts.data]);
 
@@ -253,10 +257,7 @@ function Solve() {
   const isCorrect = () => {
     if (!q) return false;
     if (isNat)
-      return (
-        natValue.trim() !== "" &&
-        natValue.trim().toLowerCase() === (q.answer_text ?? "").trim().toLowerCase()
-      );
+      return natValue.trim() !== "" && checkNatAnswer(natValue, q.answer_text);
     if (isMsq) return multi.length > 0 && sameSet(multi, answerKey);
     return selected === q.correct_index;
   };
@@ -518,7 +519,7 @@ function ImportPanel() {
     mutationFn: async () => {
       const image_path = imageFile ? await uploadPyqImage(imageFile) : null;
       const indices = correctNumbers.map((n) => n - 1);
-      await addPyqQuestions([
+      return addPyqQuestions([
         {
           year: Number(year),
           paper,
@@ -536,7 +537,11 @@ function ImportPanel() {
         },
       ]);
     },
-    onSuccess: () => {
+    onSuccess: (res) => {
+      if (!res.added) {
+        toast.error("This question is already in the bank — skipped.");
+        return;
+      }
       setQuestion("");
       setOptionsText("");
       setAnswerText("");
@@ -553,12 +558,13 @@ function ImportPanel() {
     mutationFn: async () => {
       const rows = parsePyqBulk(bulk, paper);
       if (!rows.length) throw new Error("Nothing to import");
-      await addPyqQuestions(rows);
-      return rows.length;
+      return addPyqQuestions(rows);
     },
-    onSuccess: (n) => {
+    onSuccess: ({ added, skipped }) => {
       setBulk("");
-      toast.success(`Imported ${n} question${n === 1 ? "" : "s"}`);
+      toast.success(
+        `Imported ${added} question${added === 1 ? "" : "s"}${skipped ? `, skipped ${skipped} duplicate${skipped === 1 ? "" : "s"}` : ""}`,
+      );
       qc.invalidateQueries({ queryKey: ["pyq-all"] });
       qc.invalidateQueries({ queryKey: ["pyq-mine"] });
     },
@@ -635,7 +641,7 @@ function ImportPanel() {
                 id="pyq-answer"
                 value={answerText}
                 onChange={(e) => setAnswerText(e.target.value)}
-                placeholder="e.g. 12.5"
+                placeholder="e.g. 12.5 or 4.0 to 4.2"
               />
             </div>
           ) : (
@@ -667,7 +673,9 @@ function ImportPanel() {
       <div className="rounded-2xl border border-border bg-card p-6">
         <h2 className="text-lg font-bold">Bulk import</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Paste a JSON array, or one question per line as:
+          Correct answers are always 1-based (1 = A). Paste a JSON array (fields: year, paper,
+          subject, topic, qtype, marks, question, options, correct e.g. 3 or [2,4], answer for NAT
+          e.g. "4.0 to 4.2", explanation), or one question per line as:
           <br />
           <code className="text-xs">
             year | subject | topic | question | optA ;; optB ;; optC ;; optD | correct (3, or 2,4

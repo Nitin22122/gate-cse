@@ -457,6 +457,9 @@ export type PracticeQuestion = {
   question: string;
   options: string[];
   correct_index: number;
+  correct_indices: number[] | null;
+  nat_answer: string | null;
+  image_path: string | null;
   explanation: string | null;
   status: string;
   created_at: string;
@@ -466,6 +469,8 @@ export type PracticeAttempt = {
   id: string;
   question_id: string;
   selected_index: number | null;
+  selected_indices: number[] | null;
+  nat_input: string | null;
   is_correct: boolean;
   skipped: boolean;
   time_taken_secs: number | null;
@@ -526,9 +531,17 @@ export type QuestionInput = {
   question: string;
   options: string[];
   correct_index: number;
+  correct_indices?: number[] | null;
+  nat_answer?: string | null;
+  image_path?: string | null;
   explanation?: string;
   author_name?: string | null;
 };
+
+/** 0-based correct option list for a practice question (MSQ-aware). */
+export function practiceCorrectSet(q: Pick<PracticeQuestion, "correct_index" | "correct_indices">) {
+  return q.correct_indices && q.correct_indices.length ? q.correct_indices : [q.correct_index];
+}
 
 export async function submitQuestion(input: QuestionInput) {
   const user_id = await getUserId();
@@ -564,6 +577,8 @@ export async function fetchMyAttempts(): Promise<PracticeAttempt[]> {
 export async function recordAttempt(input: {
   question_id: string;
   selected_index: number | null;
+  selected_indices?: number[] | null;
+  nat_input?: string | null;
   is_correct: boolean;
   skipped: boolean;
   time_taken_secs?: number | null;
@@ -603,6 +618,8 @@ export type PyqQuestion = {
   question: string;
   options: string[];
   correct_index: number;
+  correct_indices: number[];
+  image_path: string | null;
   answer_text: string | null;
   explanation: string | null;
   created_at: string;
@@ -612,6 +629,7 @@ export type PyqAttempt = {
   id: string;
   question_id: string;
   selected_index: number | null;
+  selected_indices: number[];
   answer_text: string | null;
   is_correct: boolean;
   skipped: boolean;
@@ -619,27 +637,66 @@ export type PyqAttempt = {
 };
 
 export const PYQ_YEARS = Array.from({ length: 27 }, (_, i) => 2026 - i);
-export const PYQ_PAPERS = ["CS", "DA"] as const;
+export const PYQ_PAPERS = ["CS", "CS-1", "CS-2", "DA"] as const;
+export const PYQ_TYPES = ["MCQ", "MSQ", "NAT"] as const;
+export const PYQ_MARKS = [1, 2] as const;
 
+export async function uploadPyqImage(file: File | Blob, name = "image.jpg") {
+  const user_id = await getUserId();
+  const raw = file instanceof File ? file.name : name;
+  const safe = raw.replace(/[^\w.\-]+/g, "_");
+  const path = `${user_id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safe}`;
+  const up = await supabase.storage.from("pyq-images").upload(path, file);
+  if (up.error) throw new Error(up.error.message);
+  return path;
+}
+
+export async function pyqImageUrl(path: string) {
+  const { data, error } = await supabase.storage
+    .from("pyq-images")
+    .createSignedUrl(path, 60 * 60);
+  if (error) throw new Error(error.message);
+  return data.signedUrl;
+}
+
+const PAGE = 1000;
+
+/** Fetch every PYQ in pages of 1000 so large banks (2000–2026) are never truncated. */
 export async function fetchPyqQuestions(): Promise<PyqQuestion[]> {
-  return (unwrap(
-    await supabase
-      .from("pyq_questions")
-      .select("*")
-      .order("year", { ascending: false })
-      .order("created_at", { ascending: true }),
-  ) ?? []) as PyqQuestion[];
+  const all: PyqQuestion[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const rows = (unwrap(
+      await supabase
+        .from("pyq_questions")
+        .select("*")
+        .order("year", { ascending: false })
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, from + PAGE - 1),
+    ) ?? []) as PyqQuestion[];
+    all.push(...rows);
+    if (rows.length < PAGE) break;
+  }
+  return all;
 }
 
 export async function fetchMyPyqQuestions(): Promise<PyqQuestion[]> {
   const user_id = await getUserId();
-  return (unwrap(
-    await supabase
-      .from("pyq_questions")
-      .select("*")
-      .eq("user_id", user_id)
-      .order("created_at", { ascending: false }),
-  ) ?? []) as PyqQuestion[];
+  const all: PyqQuestion[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const rows = (unwrap(
+      await supabase
+        .from("pyq_questions")
+        .select("*")
+        .eq("user_id", user_id)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, from + PAGE - 1),
+    ) ?? []) as PyqQuestion[];
+    all.push(...rows);
+    if (rows.length < PAGE) break;
+  }
+  return all;
 }
 
 export type PyqInput = {
@@ -652,15 +709,49 @@ export type PyqInput = {
   question: string;
   options: string[];
   correct_index: number;
+  correct_indices?: number[];
+  image_path?: string | null;
   answer_text?: string | null;
   explanation?: string | null;
 };
 
+/** Normalised identity of a question, used to block duplicate imports. */
+export function pyqKey(q: { year: number; paper: string; question: string }) {
+  const text = q.question.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 160);
+  return `${q.year}|${q.paper.toUpperCase()}|${text}`;
+}
+
+/** Inserts questions, skipping any already in the bank (or repeated in the batch). */
 export async function addPyqQuestions(rows: PyqInput[]) {
   const user_id = await getUserId();
-  const payload = rows.map((r) => ({ ...r, user_id }));
-  const { error } = await supabase.from("pyq_questions").insert(payload as never);
-  if (error) throw new Error(error.message);
+  const years = [...new Set(rows.map((r) => r.year))];
+  const existing = new Set<string>();
+  for (let from = 0; years.length; from += PAGE) {
+    const res = (unwrap(
+      await supabase
+        .from("pyq_questions")
+        .select("year, paper, question")
+        .in("year", years)
+        .order("id", { ascending: true })
+        .range(from, from + PAGE - 1),
+    ) ?? []) as { year: number; paper: string; question: string }[];
+    res.forEach((r) => existing.add(pyqKey(r)));
+    if (res.length < PAGE) break;
+  }
+  const fresh: PyqInput[] = [];
+  for (const r of rows) {
+    const k = pyqKey(r);
+    if (existing.has(k)) continue;
+    existing.add(k);
+    fresh.push(r);
+  }
+  if (fresh.length) {
+    const { error } = await supabase
+      .from("pyq_questions")
+      .insert(fresh.map((r) => ({ ...r, user_id })) as never);
+    if (error) throw new Error(error.message);
+  }
+  return { added: fresh.length, skipped: rows.length - fresh.length };
 }
 
 export async function deletePyqQuestion(id: string) {
@@ -669,48 +760,120 @@ export async function deletePyqQuestion(id: string) {
 }
 
 export async function fetchMyPyqAttempts(): Promise<PyqAttempt[]> {
-  return (unwrap(
-    await supabase.from("pyq_attempts").select("*").order("created_at", { ascending: false }),
-  ) ?? []) as PyqAttempt[];
+  const all: PyqAttempt[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const rows = (unwrap(
+      await supabase
+        .from("pyq_attempts")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, from + PAGE - 1),
+    ) ?? []) as PyqAttempt[];
+    all.push(...rows);
+    if (rows.length < PAGE) break;
+  }
+  return all;
+}
+
+/** One result per question — the most recent non-skipped attempt (attempts sorted newest first). */
+export function latestPyqResults(attempts: PyqAttempt[]) {
+  const map = new Map<string, PyqAttempt>();
+  for (const a of attempts) {
+    if (a.skipped) continue;
+    if (!map.has(a.question_id)) map.set(a.question_id, a);
+  }
+  return map;
 }
 
 export async function recordPyqAttempt(input: {
   question_id: string;
   selected_index: number | null;
+  selected_indices?: number[];
   answer_text?: string | null;
   is_correct: boolean;
   skipped: boolean;
 }) {
   const user_id = await getUserId();
-  const { error } = await supabase.from("pyq_attempts").insert({ ...input, user_id } as never);
+  const { error } = await supabase
+    .from("pyq_attempts")
+    .insert({ selected_indices: [], ...input, user_id } as never);
   if (error) throw new Error(error.message);
 }
 
-/** Parse pasted JSON array or line format:
- * year | subject | topic | question | optA ;; optB ;; optC ;; optD | correctNumber | explanation
+/** Parses a NAT key: "12.5", "4.0 to 4.2", "4.0 - 4.2", "4.0:4.2", "-3 to -1". */
+export function parseNatRange(key: string | null | undefined): [number, number] | null {
+  if (!key) return null;
+  const s = key.trim().replace(/[–—]/g, "-");
+  const num = "(-?\\d+(?:\\.\\d+)?|-?\\.\\d+)";
+  const range = s.match(new RegExp(`^${num}\\s*(?:to|:|-)\\s*${num}$`, "i"));
+  if (range) {
+    const a = Number(range[1]);
+    const b = Number(range[2]);
+    return [Math.min(a, b), Math.max(a, b)];
+  }
+  const single = Number(s);
+  return Number.isFinite(single) ? [single, single] : null;
+}
+
+/** Numeric NAT grading with a tolerance so 12.5 == 12.50 and ranges are honoured. */
+export function checkNatAnswer(input: string, key: string | null | undefined) {
+  const v = Number(input.trim());
+  const r = parseNatRange(key);
+  if (!r || !Number.isFinite(v) || input.trim() === "") {
+    return !!key && input.trim().toLowerCase() === key.trim().toLowerCase();
+  }
+  const eps = 1e-6 * Math.max(1, Math.abs(r[0]), Math.abs(r[1]));
+  return v >= r[0] - eps && v <= r[1] + eps;
+}
+
+function toNumbers(v: unknown): number[] {
+  if (Array.isArray(v)) return v.map(Number).filter((n) => Number.isFinite(n));
+  if (typeof v === "number") return [v];
+  if (typeof v === "string")
+    return v
+      .split(/[,\s]+/)
+      .map((x) => x.trim().toUpperCase())
+      .filter(Boolean)
+      .map((x) => (/^[A-F]$/.test(x) ? x.charCodeAt(0) - 64 : Number(x)))
+      .filter((n) => Number.isFinite(n));
+  return [];
+}
+
+/**
+ * Bulk import. Correct answers are ALWAYS 1-based (1 = option A) in both formats.
+ * JSON: [{ year, paper, subject, topic, qtype, marks, question, options, correct: 3 | [2,4] | "B", answer: "4.0 to 4.2", explanation }]
+ * Line: year | subject | topic | question | optA ;; optB ;; optC ;; optD | correct (3, or 2,4) | explanation | marks
  */
 export function parsePyqBulk(text: string, fallbackPaper: string): PyqInput[] {
   const trimmed = text.trim();
   if (!trimmed) return [];
   if (trimmed.startsWith("[")) {
     const arr = JSON.parse(trimmed) as Record<string, unknown>[];
-    return arr.map((r) => {
-      const options = Array.isArray(r['options']) ? (r['options'] as string[]).map(String) : [];
-      const correct = Number(r['correct_index'] ?? r['correct'] ?? 1);
-      return {
-        year: Number(r['year'] ?? 2024),
-        paper: String(r['paper'] ?? fallbackPaper),
-        subject: String(r['subject'] ?? "Algorithms"),
-        topic: String(r['topic'] ?? "Untagged"),
-        qtype: String(r['qtype'] ?? (options.length ? "MCQ" : "NAT")),
-        marks: Number(r['marks'] ?? 1),
-        question: String(r['question'] ?? ""),
-        options,
-        correct_index: r['correct_index'] !== undefined ? correct : Math.max(0, correct - 1),
-        answer_text: r['answer_text'] ? String(r['answer_text']) : null,
-        explanation: r['explanation'] ? String(r['explanation']) : null,
-      } satisfies PyqInput;
-    }).filter((r) => r.question.trim().length > 0);
+    return arr
+      .map((r) => {
+        const options = Array.isArray(r["options"]) ? (r["options"] as unknown[]).map(String) : [];
+        const nums = toNumbers(r["correct"]).filter((n) => n >= 1 && n <= options.length);
+        const qtype = String(
+          r["qtype"] ?? (!options.length ? "NAT" : nums.length > 1 ? "MSQ" : "MCQ"),
+        ).toUpperCase();
+        const answer = r["answer"] ?? r["answer_text"];
+        return {
+          year: Number(r["year"] ?? 2024),
+          paper: String(r["paper"] ?? fallbackPaper),
+          subject: String(r["subject"] ?? "Algorithms"),
+          topic: String(r["topic"] ?? "Untagged"),
+          qtype,
+          marks: Number(r["marks"] ?? 1) === 2 ? 2 : 1,
+          question: String(r["question"] ?? ""),
+          options: qtype === "NAT" ? [] : options,
+          correct_index: Math.max(0, (nums[0] ?? 1) - 1),
+          correct_indices: qtype === "MSQ" ? nums.map((n) => n - 1) : [],
+          answer_text: qtype === "NAT" && answer != null ? String(answer) : null,
+          explanation: r["explanation"] ? String(r["explanation"]) : null,
+        } satisfies PyqInput;
+      })
+      .filter((r) => r.question.trim().length > 0);
   }
 
   return trimmed
@@ -723,18 +886,25 @@ export function parsePyqBulk(text: string, fallbackPaper: string): PyqInput[] {
         .split(";;")
         .map((o) => o.trim())
         .filter(Boolean);
+      const answerField = p[5] ?? "";
+      const nums = options.length
+        ? toNumbers(answerField).filter((n) => n >= 1 && n <= options.length)
+        : [];
+      const isMsq = options.length > 0 && nums.length > 1;
+      const qtype = options.length ? (isMsq ? "MSQ" : "MCQ") : "NAT";
       return {
         year: Number(p[0] ?? 2024) || 2024,
         paper: fallbackPaper,
         subject: p[1] || "Algorithms",
         topic: p[2] || "Untagged",
-        qtype: options.length ? "MCQ" : "NAT",
-        marks: 1,
+        qtype,
+        marks: Number(p[7] ?? 1) === 2 ? 2 : 1,
         question: p[3] ?? "",
         options,
-        correct_index: Math.max(0, (Number(p[5] ?? 1) || 1) - 1),
-        answer_text: options.length ? null : (p[5] ?? null),
-        explanation: p[6] ?? null,
+        correct_index: Math.max(0, (nums[0] ?? 1) - 1),
+        correct_indices: isMsq ? nums.map((n) => n - 1) : [],
+        answer_text: options.length ? null : answerField || null,
+        explanation: p[6] || null,
       } satisfies PyqInput;
     })
     .filter((r) => r.question.length > 0);
