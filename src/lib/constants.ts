@@ -1,3 +1,5 @@
+export const TIMER_URL = "/timer";
+
 export const QUOTES = [
   "Doubt kills more dreams than failure ever will. Trust the process.",
   "Discipline is choosing between what you want now and what you want most.",
