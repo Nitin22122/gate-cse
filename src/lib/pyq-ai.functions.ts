@@ -60,20 +60,29 @@ const inputSchema = z.object({
 export const extractPyqFromPages = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => inputSchema.parse(d))
   .handler(async ({ data }) => {
-    const key = process.env["LOVABLE_API_KEY"];
-    if (!key) throw new Error("AI is not configured");
+    const lovableKey = process.env["LOVABLE_API_KEY"];
+    const openaiKey = process.env["OPENAI_API_KEY"];
+    if (!lovableKey && !openaiKey) throw new Error("AI is not configured");
 
     const { createOpenAI } = await import("@ai-sdk/openai");
     const { streamText, Output, NoObjectGeneratedError } = await import("ai");
-    const { createLovableAiGatewayRunIdFetch } = await import("./run-id.server");
 
-    const runIdFetch = createLovableAiGatewayRunIdFetch();
-    const provider = createOpenAI({
-      baseURL: "https://ai.gateway.lovable.dev/v1",
-      apiKey: key,
-      headers: { "Lovable-API-Key": key, "X-Lovable-AIG-SDK": "vercel-ai-sdk" },
-      fetch: runIdFetch.fetch,
-    });
+    let model: ReturnType<ReturnType<typeof createOpenAI>["responses"]>;
+    if (lovableKey) {
+      const { createLovableAiGatewayRunIdFetch } = await import("./run-id.server");
+      const runIdFetch = createLovableAiGatewayRunIdFetch();
+      const provider = createOpenAI({
+        baseURL: "https://ai.gateway.lovable.dev/v1",
+        apiKey: lovableKey,
+        headers: { "Lovable-API-Key": lovableKey, "X-Lovable-AIG-SDK": "vercel-ai-sdk" },
+        fetch: runIdFetch.fetch,
+      });
+      model = provider.responses("openai/gpt-6-astra");
+    } else {
+      // Self-hosted fallback (e.g. Vercel): use the deployment's own OpenAI key.
+      const provider = createOpenAI({ apiKey: openaiKey! });
+      model = provider.responses("gpt-4o");
+    }
 
     const instructions = [
       `You extract GATE ${data.paper} ${data.year} questions from scanned exam paper pages.`,
@@ -104,7 +113,7 @@ export const extractPyqFromPages = createServerFn({ method: "POST" })
 
     try {
       const result = streamText({
-        model: provider.responses("openai/gpt-6-astra"),
+        model,
         system: instructions,
         messages: [{ role: "user", content }],
         output: Output.object({ schema: outputSchema }),

@@ -18,12 +18,39 @@ export const formatQuestionsWithAI = createServerFn({ method: "POST" })
     return { rawText: input.rawText.slice(0, 20000), defaultSubject: input.defaultSubject ?? "" };
   })
   .handler(async ({ data }) => {
-    const key = process.env["LOVABLE_API_KEY"];
-    if (!key) throw new Error("AI is not configured");
+    const lovableKey = process.env["LOVABLE_API_KEY"];
+    const openaiKey = process.env["OPENAI_API_KEY"];
+    if (!lovableKey && !openaiKey) throw new Error("AI is not configured");
 
-    const { generateText } = await import("ai");
-    const { createLovableAiGatewayProvider } = await import("./ai-gateway.server");
-    const gateway = createLovableAiGatewayProvider(key);
+    const { streamText } = await import("ai");
+    let model: Parameters<typeof streamText>[0]["model"];
+    let providerOptions: Parameters<typeof streamText>[0]["providerOptions"];
+    if (lovableKey) {
+      const { createOpenAI } = await import("@ai-sdk/openai");
+      const { createLovableAiGatewayRunIdFetch } = await import("./run-id.server");
+      const runIdFetch = createLovableAiGatewayRunIdFetch();
+      const provider = createOpenAI({
+        baseURL: "https://ai.gateway.lovable.dev/v1",
+        apiKey: lovableKey,
+        headers: { "Lovable-API-Key": lovableKey, "X-Lovable-AIG-SDK": "vercel-ai-sdk" },
+        fetch: runIdFetch.fetch,
+      });
+      model = provider.responses("openai/gpt-6-astra");
+      providerOptions = {
+        openai: {
+          forceReasoning: true,
+          reasoningEffort: "low",
+          reasoningSummary: "auto",
+          store: false,
+          include: ["reasoning.encrypted_content"],
+        },
+      };
+    } else {
+      // Self-hosted fallback (e.g. Vercel): use the deployment's own OpenAI key.
+      const { createOpenAI } = await import("@ai-sdk/openai");
+      model = createOpenAI({ apiKey: openaiKey! })("gpt-4o");
+      providerOptions = undefined;
+    }
 
     const system = [
       "You are an expert GATE CS problem formatter.",
@@ -38,12 +65,13 @@ export const formatQuestionsWithAI = createServerFn({ method: "POST" })
 
     let text = "";
     try {
-      const result = await generateText({
-        model: gateway("google/gemini-3.7-flash"),
+      const result = streamText({
+        model,
         system,
         prompt: data.rawText,
+        ...(providerOptions ? { providerOptions } : {}),
       });
-      text = result.text;
+      text = await result.text;
     } catch (error) {
       const status = (error as { statusCode?: number; status?: number }).statusCode ??
         (error as { status?: number }).status;
