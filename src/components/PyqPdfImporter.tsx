@@ -26,13 +26,14 @@ import {
   type PyqInput,
 } from "@/lib/data";
 import { extractPyqFromPages, type PdfDraftQuestion } from "@/lib/pyq-ai.functions";
+import { AiConfigButton, useAiConfig } from "@/components/AiConfigModal";
 
 type Draft = PdfDraftQuestion & { figureBlob: Blob | null; figureUrl: string | null };
 type RenderedPage = { page: number; canvas: HTMLCanvasElement; image: string };
 
 const LETTERS = ["A", "B", "C", "D", "E", "F"];
-const BATCH = 3; // pages per AI call
-const STEP = 2; // overlap one page so questions split across pages are not lost
+const BATCH = 2; // pages per AI call (optimized for fast completion and low latency)
+const STEP = 2; // overlap window
 
 async function loadPdfjs() {
   const pdfjs = await import("pdfjs-dist");
@@ -47,7 +48,7 @@ async function renderPdf(file: File, onPage: (n: number, total: number) => void)
   const pages: RenderedPage[] = [];
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i);
-    const viewport = page.getViewport({ scale: 1.6 });
+    const viewport = page.getViewport({ scale: 1.4 });
     const canvas = document.createElement("canvas");
     canvas.width = Math.floor(viewport.width);
     canvas.height = Math.floor(viewport.height);
@@ -97,6 +98,7 @@ function cropFigure(pages: RenderedPage[], f: NonNullable<PdfDraftQuestion["figu
 export function PyqPdfImporter() {
   const qc = useQueryClient();
   const extract = useServerFn(extractPyqFromPages);
+  const { apiKey, provider } = useAiConfig();
   const [year, setYear] = useState(String(PYQ_YEARS[0]));
   const [paper, setPaper] = useState<string>("CS-2");
   const [file, setFile] = useState<File | null>(null);
@@ -140,6 +142,8 @@ export function PyqPdfImporter() {
             year: Number(year),
             paper,
             answerKey,
+            apiKey: apiKey || null,
+            provider: provider || null,
           },
         });
         for (const q of res.questions) {
@@ -216,9 +220,12 @@ export function PyqPdfImporter() {
 
   return (
     <div className="rounded-2xl border border-primary/40 bg-card p-6">
-      <h2 className="flex items-center gap-2 text-xl font-extrabold text-primary">
-        <Sparkles className="size-5" /> AI PDF Importer
-      </h2>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="flex items-center gap-2 text-xl font-extrabold text-primary">
+          <Sparkles className="size-5" /> AI PDF Importer
+        </h2>
+        <AiConfigButton />
+      </div>
       <p className="mt-1 text-sm text-muted-foreground">
         Upload a full GATE paper PDF. AI reads every page and pulls out each question, its options,
         type (MCQ/MSQ/NAT), marks, subject, topic, diagrams, the answer and an explanation. Add the
@@ -289,12 +296,27 @@ export function PyqPdfImporter() {
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-bold text-primary">Q.{d.question_number}</span>
                   <Badge variant={d.answer_source === "key" ? "secondary" : "outline"}>
-                    {d.answer_source === "key" ? "Answer key" : "AI answer"}
+                    {d.answer_source === "key" ? "Official key" : "AI answer"}
                   </Badge>
                   <div className="ml-auto flex flex-wrap gap-2">
-                    <Pick small value={d.subject} onChange={(v) => update(i, { subject: v as Draft["subject"] })} options={PRACTICE_SUBJECTS} />
-                    <Pick small value={d.qtype} onChange={(v) => update(i, { qtype: v as Draft["qtype"] })} options={PYQ_TYPES} />
-                    <Pick small value={String(d.marks === 2 ? 2 : 1)} onChange={(v) => update(i, { marks: Number(v) })} options={["1", "2"]} />
+                    <Pick
+                      small
+                      value={d.subject}
+                      onChange={(v) => update(i, { subject: v as PdfDraftQuestion["subject"] })}
+                      options={PRACTICE_SUBJECTS}
+                    />
+                    <Pick
+                      small
+                      value={d.qtype}
+                      onChange={(v) => update(i, { qtype: v as "MCQ" | "MSQ" | "NAT" })}
+                      options={PYQ_TYPES}
+                    />
+                    <Pick
+                      small
+                      value={String(d.marks === 2 ? 2 : 1)}
+                      onChange={(v) => update(i, { marks: Number(v) })}
+                      options={["1", "2"]}
+                    />
                     <Button
                       size="icon"
                       variant="ghost"
@@ -305,24 +327,46 @@ export function PyqPdfImporter() {
                     </Button>
                   </div>
                 </div>
+
                 <p className="mt-2 whitespace-pre-wrap font-medium">{d.question}</p>
+
                 {d.figureUrl && (
                   <div className="mt-2 flex items-start gap-2">
-                    <img src={d.figureUrl} alt={`Figure for Q.${d.question_number}`} className="max-h-60 rounded-lg border border-border" />
-                    <Button size="sm" variant="ghost" onClick={() => update(i, { figureBlob: null, figureUrl: null })}>
-                      Remove image
+                    <img
+                      src={d.figureUrl}
+                      alt="Extracted figure"
+                      className="max-h-48 rounded border border-border bg-background"
+                    />
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        URL.revokeObjectURL(d.figureUrl!);
+                        update(i, { figureBlob: null, figureUrl: null });
+                      }}
+                    >
+                      Remove picture
                     </Button>
                   </div>
                 )}
+
                 {!isNat && (
                   <ol className="mt-2 grid gap-1 sm:grid-cols-2">
                     {d.options.map((o, k) => (
-                      <li key={k} className={d.correct.includes(k + 1) ? "font-semibold text-primary" : "text-muted-foreground"}>
+                      <li
+                        key={k}
+                        className={
+                          d.correct.includes(k + 1)
+                            ? "font-semibold text-primary"
+                            : "text-muted-foreground"
+                        }
+                      >
                         {LETTERS[k]}. {o}
                       </li>
                     ))}
                   </ol>
                 )}
+
                 <div className="mt-3 grid gap-2 sm:grid-cols-[200px_1fr]">
                   <Input
                     value={isNat ? (d.nat_answer ?? "") : d.correct.map((n) => LETTERS[n - 1] ?? n).join(",")}

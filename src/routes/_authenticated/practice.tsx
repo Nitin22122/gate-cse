@@ -13,11 +13,12 @@ import {
   Trash2,
   Trophy,
   XCircle,
+  FileText,
 } from "lucide-react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { FileText } from "lucide-react";
 import { PracticePdfImporter } from "@/components/PracticePdfImporter";
+import { AiConfigButton, useAiConfig } from "@/components/AiConfigModal";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -490,6 +491,7 @@ function AiEntry() {
   const qc = useQueryClient();
   const profile = useQuery({ queryKey: ["profile"], queryFn: fetchProfile });
   const format = useServerFn(formatQuestionsWithAI);
+  const { apiKey, provider } = useAiConfig();
 
   const [defaultSubject, setDefaultSubject] = useState<string>(PRACTICE_SUBJECTS[0]);
   const [tag, setTag] = useState<string>("Untagged");
@@ -498,7 +500,14 @@ function AiEntry() {
 
   const parse = useMutation({
     mutationFn: async () => {
-      const res = await format({ data: { rawText: raw, defaultSubject } });
+      const res = await format({
+        data: {
+          rawText: raw,
+          defaultSubject,
+          apiKey: apiKey || null,
+          provider: provider || null,
+        },
+      });
       return res.questions;
     },
     onSuccess: (questions) => {
@@ -535,6 +544,11 @@ function AiEntry() {
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-semibold">AI Question Formatter</p>
+        <AiConfigButton />
+      </div>
+
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="grid gap-2">
           <Label>Default subject (used if unclear)</Label>

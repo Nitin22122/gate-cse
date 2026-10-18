@@ -29,7 +29,7 @@ import { fmtClock, fmtDuration, useStudyTimer } from "@/lib/use-study-timer";
 import { SOUNDS, type SoundId } from "@/lib/study-sound";
 
 
-export const Route = createFileRoute("/")({
+export const Route = createFileRoute("/timer")({
   head: () => ({
     meta: [
       { title: "Focus Timer — Pomodoro Study Tracker" },

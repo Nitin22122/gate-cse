@@ -1,4 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
+import { generateText } from "ai";
+import { getAiModel, formatAiError } from "./ai-provider.server";
 
 export type AiDraftQuestion = {
   subject: string;
@@ -11,46 +13,29 @@ export type AiDraftQuestion = {
 };
 
 export const formatQuestionsWithAI = createServerFn({ method: "POST" })
-  .inputValidator((input: { rawText: string; defaultSubject?: string }) => {
-    if (!input || typeof input.rawText !== "string" || input.rawText.trim().length < 10) {
-      throw new Error("Paste your question text first");
-    }
-    return { rawText: input.rawText.slice(0, 20000), defaultSubject: input.defaultSubject ?? "" };
-  })
-  .handler(async ({ data }) => {
-    const lovableKey = process.env["LOVABLE_API_KEY"];
-    const openaiKey = process.env["OPENAI_API_KEY"];
-    if (!lovableKey && !openaiKey) throw new Error("AI is not configured");
-
-    const { streamText } = await import("ai");
-    let model: Parameters<typeof streamText>[0]["model"];
-    let providerOptions: Parameters<typeof streamText>[0]["providerOptions"];
-    if (lovableKey) {
-      const { createOpenAI } = await import("@ai-sdk/openai");
-      const { createLovableAiGatewayRunIdFetch } = await import("./run-id.server");
-      const runIdFetch = createLovableAiGatewayRunIdFetch();
-      const provider = createOpenAI({
-        baseURL: "https://ai.gateway.lovable.dev/v1",
-        apiKey: lovableKey,
-        headers: { "Lovable-API-Key": lovableKey, "X-Lovable-AIG-SDK": "vercel-ai-sdk" },
-        fetch: runIdFetch.fetch,
-      });
-      model = provider.responses("openai/gpt-6-astra");
-      providerOptions = {
-        openai: {
-          forceReasoning: true,
-          reasoningEffort: "low",
-          reasoningSummary: "auto",
-          store: false,
-          include: ["reasoning.encrypted_content"],
-        },
+  .inputValidator(
+    (input: {
+      rawText: string;
+      defaultSubject?: string;
+      apiKey?: string | null;
+      provider?: string | null;
+    }) => {
+      if (!input || typeof input.rawText !== "string" || input.rawText.trim().length < 10) {
+        throw new Error("Paste your question text first");
+      }
+      return {
+        rawText: input.rawText.slice(0, 30000),
+        defaultSubject: input.defaultSubject ?? "",
+        apiKey: input.apiKey ?? null,
+        provider: input.provider ?? null,
       };
-    } else {
-      // Self-hosted fallback (e.g. Vercel): use the deployment's own OpenAI key.
-      const { createOpenAI } = await import("@ai-sdk/openai");
-      model = createOpenAI({ apiKey: openaiKey! })("gpt-4o");
-      providerOptions = undefined;
-    }
+    },
+  )
+  .handler(async ({ data }) => {
+    const { model, isLovableGateway } = await getAiModel({
+      apiKey: data.apiKey,
+      provider: data.provider,
+    });
 
     const system = [
       "You are an expert GATE CS problem formatter.",
@@ -63,21 +48,30 @@ export const formatQuestionsWithAI = createServerFn({ method: "POST" })
       data.defaultSubject ? `If the subject is unclear, use: ${data.defaultSubject}.` : "",
     ].join(" ");
 
+    const providerOptions = isLovableGateway
+      ? {
+          openai: {
+            forceReasoning: true,
+            reasoningEffort: "low" as const,
+            reasoningSummary: "auto" as const,
+            store: false,
+            include: ["reasoning.encrypted_content"],
+          },
+        }
+      : undefined;
+
     let text = "";
     try {
-      const result = streamText({
+      const result = await generateText({
         model,
         system,
         prompt: data.rawText,
         ...(providerOptions ? { providerOptions } : {}),
       });
-      text = await result.text;
+      text = result.text;
     } catch (error) {
-      const status = (error as { statusCode?: number; status?: number }).statusCode ??
-        (error as { status?: number }).status;
-      if (status === 429) throw new Error("AI is rate limited right now — try again shortly.");
-      if (status === 402) throw new Error("AI credits are exhausted for this workspace.");
-      throw new Error("AI could not format these questions. Try again.");
+      console.error("formatQuestionsWithAI error:", error);
+      throw new Error(formatAiError(error));
     }
 
     const match = text.match(/\[[\s\S]*\]/);

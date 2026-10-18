@@ -25,9 +25,10 @@ import {
   type QuestionInput,
 } from "@/lib/data";
 import { extractPyqFromPages, type PdfDraftQuestion } from "@/lib/pyq-ai.functions";
+import { AiConfigButton, useAiConfig } from "@/components/AiConfigModal";
 
 const LETTERS = ["A", "B", "C", "D", "E", "F"];
-const BATCH = 3;
+const BATCH = 2;
 const STEP = 2;
 
 type RenderedPage = { page: number; image: string; canvas: HTMLCanvasElement };
@@ -57,7 +58,7 @@ async function renderPdf(file: File, onPage: (n: number, t: number) => void) {
   const pages: RenderedPage[] = [];
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i);
-    const viewport = page.getViewport({ scale: 1.6 });
+    const viewport = page.getViewport({ scale: 1.4 });
     const canvas = document.createElement("canvas");
     canvas.width = Math.floor(viewport.width);
     canvas.height = Math.floor(viewport.height);
@@ -74,6 +75,7 @@ async function renderPdf(file: File, onPage: (n: number, t: number) => void) {
 export function PracticePdfImporter() {
   const qc = useQueryClient();
   const extract = useServerFn(extractPyqFromPages);
+  const { apiKey, provider } = useAiConfig();
   const [file, setFile] = useState<File | null>(null);
   const [difficulty, setDifficulty] = useState<string>("Medium");
   const [tag, setTag] = useState<string>("Untagged");
@@ -105,7 +107,14 @@ export function PracticePdfImporter() {
         const win = windows[w]!;
         setStatus(`AI reading pages ${win[0]!.page}–${win[win.length - 1]!.page} (batch ${w + 1} of ${windows.length})…`);
         const res = await extract({
-          data: { pages: win.map(({ page, image }) => ({ page, image })), year: new Date().getFullYear(), paper: "practice set", answerKey: null },
+          data: {
+            pages: win.map(({ page, image }) => ({ page, image })),
+            year: new Date().getFullYear(),
+            paper: "practice set",
+            answerKey: null,
+            apiKey: apiKey || null,
+            provider: provider || null,
+          },
         });
         for (const q of res.questions) {
           const k = q.question.slice(0, 60).toLowerCase();
@@ -166,10 +175,14 @@ export function PracticePdfImporter() {
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
-        Upload a PDF of questions (DPP, test, notes). AI reads every page and pulls out each question,
-        options, type, correct answer, subject and an explanation. Review, then publish.
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm text-muted-foreground">
+          Upload a PDF of questions (DPP, test, notes). AI reads each page and extracts questions,
+          options, answers and explanations.
+        </p>
+        <AiConfigButton />
+      </div>
+
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="grid gap-1.5">
           <Label htmlFor="prac-pdf">Questions PDF</Label>
