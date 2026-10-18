@@ -55,7 +55,11 @@ export async function getAiModel(options?: ResolveAiOptions): Promise<ResolvedAi
   // 1. Explicit or detected Google Gemini
   if ((reqProvider === "gemini" && reqApiKey) || (geminiKey && (!reqProvider || reqProvider === "auto" || reqProvider === "gemini"))) {
     const google = createGoogleGenerativeAI({ apiKey: geminiKey! });
-    const selectedModel = options?.modelName || "gemini-2.0-flash";
+    let selectedModel = options?.modelName?.trim() || process.env["GEMINI_MODEL"]?.trim() || "gemini-3.8-flash";
+    // Upgrade deprecated gemini-2.0-flash if passed
+    if (selectedModel === "gemini-2.0-flash" || selectedModel === "gemini-2.0-flash-exp") {
+      selectedModel = "gemini-3.8-flash";
+    }
     return {
       model: google(selectedModel),
       providerName: `Google Gemini (${selectedModel})`,
@@ -65,7 +69,7 @@ export async function getAiModel(options?: ResolveAiOptions): Promise<ResolvedAi
   // 2. Explicit or detected OpenAI
   if ((reqProvider === "openai" && reqApiKey) || (openaiKey && (!reqProvider || reqProvider === "auto" || reqProvider === "openai"))) {
     const openai = createOpenAI({ apiKey: openaiKey! });
-    const selectedModel = options?.modelName || "gpt-4o";
+    const selectedModel = options?.modelName?.trim() || "gpt-4o";
     return {
       model: openai.chat(selectedModel),
       providerName: `OpenAI (${selectedModel})`,
@@ -78,7 +82,10 @@ export async function getAiModel(options?: ResolveAiOptions): Promise<ResolvedAi
       baseURL: "https://openrouter.ai/api/v1",
       apiKey: openrouterKey!,
     });
-    const selectedModel = options?.modelName || "google/gemini-2.0-flash-001";
+    let selectedModel = options?.modelName?.trim() || "google/gemini-3.8-flash";
+    if (selectedModel.includes("gemini-2.0-flash")) {
+      selectedModel = "google/gemini-3.8-flash";
+    }
     return {
       model: openrouter.chat(selectedModel),
       providerName: `OpenRouter (${selectedModel})`,
@@ -91,7 +98,7 @@ export async function getAiModel(options?: ResolveAiOptions): Promise<ResolvedAi
       baseURL: "https://api.groq.com/openai/v1",
       apiKey: groqKey!,
     });
-    const selectedModel = options?.modelName || "llama-3.3-70b-versatile";
+    const selectedModel = options?.modelName?.trim() || "llama-3.3-70b-versatile";
     return {
       model: groq.chat(selectedModel),
       providerName: `Groq (${selectedModel})`,

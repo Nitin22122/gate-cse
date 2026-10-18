@@ -75,7 +75,7 @@ async function renderPdf(file: File, onPage: (n: number, t: number) => void) {
 export function PracticePdfImporter() {
   const qc = useQueryClient();
   const extract = useServerFn(extractPyqFromPages);
-  const { apiKey, provider } = useAiConfig();
+  const { apiKey, provider, modelName } = useAiConfig();
   const [file, setFile] = useState<File | null>(null);
   const [difficulty, setDifficulty] = useState<string>("Medium");
   const [tag, setTag] = useState<string>("Untagged");
@@ -114,6 +114,7 @@ export function PracticePdfImporter() {
             answerKey: null,
             apiKey: apiKey || null,
             provider: provider || null,
+            modelName: modelName || null,
           },
         });
         for (const q of res.questions) {

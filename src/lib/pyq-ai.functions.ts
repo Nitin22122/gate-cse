@@ -117,6 +117,7 @@ const inputSchema = z.object({
   answerKey: z.string().max(50000).nullable().optional(),
   apiKey: z.string().nullable().optional(),
   provider: z.string().nullable().optional(),
+  modelName: z.string().nullable().optional(),
 });
 
 export const extractPyqFromPages = createServerFn({ method: "POST" })
@@ -125,6 +126,7 @@ export const extractPyqFromPages = createServerFn({ method: "POST" })
     const { model, isLovableGateway } = await getAiModel({
       apiKey: data.apiKey,
       provider: data.provider,
+      modelName: data.modelName,
     });
 
     const instructions = [

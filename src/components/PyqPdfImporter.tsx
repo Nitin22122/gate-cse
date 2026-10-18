@@ -98,7 +98,7 @@ function cropFigure(pages: RenderedPage[], f: NonNullable<PdfDraftQuestion["figu
 export function PyqPdfImporter() {
   const qc = useQueryClient();
   const extract = useServerFn(extractPyqFromPages);
-  const { apiKey, provider } = useAiConfig();
+  const { apiKey, provider, modelName } = useAiConfig();
   const [year, setYear] = useState(String(PYQ_YEARS[0]));
   const [paper, setPaper] = useState<string>("CS-2");
   const [file, setFile] = useState<File | null>(null);
@@ -144,6 +144,7 @@ export function PyqPdfImporter() {
             answerKey,
             apiKey: apiKey || null,
             provider: provider || null,
+            modelName: modelName || null,
           },
         });
         for (const q of res.questions) {

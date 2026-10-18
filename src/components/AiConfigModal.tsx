@@ -21,23 +21,34 @@ import {
 
 export const AI_STORAGE_KEY = "gate_cse_ai_key";
 export const AI_STORAGE_PROVIDER = "gate_cse_ai_provider";
+export const AI_STORAGE_MODEL = "gate_cse_ai_model";
 
 export function useAiConfig() {
   const [apiKey, setApiKey] = useState<string>("");
   const [provider, setProvider] = useState<string>("auto");
+  const [modelName, setModelName] = useState<string>("gemini-3.8-flash");
 
   useEffect(() => {
     if (typeof window !== "undefined") {
       const savedKey = localStorage.getItem(AI_STORAGE_KEY) || "";
       const savedProv = localStorage.getItem(AI_STORAGE_PROVIDER) || "auto";
+      let savedModel = localStorage.getItem(AI_STORAGE_MODEL) || "";
+      // Auto-migrate away from deprecated gemini-2.0-flash
+      if (!savedModel || savedModel === "gemini-2.0-flash" || savedModel === "gemini-2.0-flash-exp") {
+        savedModel = "gemini-3.8-flash";
+        localStorage.setItem(AI_STORAGE_MODEL, savedModel);
+      }
       setApiKey(savedKey);
       setProvider(savedProv);
+      setModelName(savedModel);
     }
   }, []);
 
-  const saveConfig = (newKey: string, newProvider: string) => {
+  const saveConfig = (newKey: string, newProvider: string, newModel?: string) => {
     setApiKey(newKey);
     setProvider(newProvider);
+    const m = newModel?.trim() || (newProvider === "openai" ? "gpt-4o" : "gemini-3.8-flash");
+    setModelName(m);
     if (typeof window !== "undefined") {
       if (newKey) {
         localStorage.setItem(AI_STORAGE_KEY, newKey);
@@ -45,32 +56,49 @@ export function useAiConfig() {
         localStorage.removeItem(AI_STORAGE_KEY);
       }
       localStorage.setItem(AI_STORAGE_PROVIDER, newProvider);
+      localStorage.setItem(AI_STORAGE_MODEL, m);
     }
   };
 
   return {
     apiKey,
     provider,
+    modelName,
     saveConfig,
     hasCustomKey: Boolean(apiKey.trim()),
   };
 }
 
 export function AiConfigButton() {
-  const { apiKey, provider, saveConfig, hasCustomKey } = useAiConfig();
+  const { apiKey, provider, modelName, saveConfig, hasCustomKey } = useAiConfig();
   const [open, setOpen] = useState(false);
   const [inputKey, setInputKey] = useState(apiKey);
   const [selectedProvider, setSelectedProvider] = useState(provider);
+  const [selectedModel, setSelectedModel] = useState(modelName);
   const [showKey, setShowKey] = useState(false);
   const [savedToast, setSavedToast] = useState(false);
 
   useEffect(() => {
     setInputKey(apiKey);
     setSelectedProvider(provider);
-  }, [apiKey, provider, open]);
+    setSelectedModel(modelName || "gemini-3.8-flash");
+  }, [apiKey, provider, modelName, open]);
+
+  const handleProviderChange = (newProvider: string) => {
+    setSelectedProvider(newProvider);
+    if (newProvider === "gemini" || newProvider === "auto") {
+      setSelectedModel("gemini-3.8-flash");
+    } else if (newProvider === "openai") {
+      setSelectedModel("gpt-4o");
+    } else if (newProvider === "openrouter") {
+      setSelectedModel("google/gemini-3.8-flash");
+    } else if (newProvider === "groq") {
+      setSelectedModel("llama-3.3-70b-versatile");
+    }
+  };
 
   const handleSave = () => {
-    saveConfig(inputKey.trim(), selectedProvider);
+    saveConfig(inputKey.trim(), selectedProvider, selectedModel.trim());
     setSavedToast(true);
     setTimeout(() => {
       setSavedToast(false);
@@ -80,8 +108,9 @@ export function AiConfigButton() {
 
   const handleClear = () => {
     setInputKey("");
-    saveConfig("", "auto");
+    saveConfig("", "auto", "gemini-3.8-flash");
     setSelectedProvider("auto");
+    setSelectedModel("gemini-3.8-flash");
   };
 
   return (
@@ -104,20 +133,32 @@ export function AiConfigButton() {
         </DialogHeader>
 
         <div className="space-y-4 py-2">
-          <div className="space-y-1.5">
-            <Label className="text-xs">AI Provider</Label>
-            <Select value={selectedProvider} onValueChange={setSelectedProvider}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select provider" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="auto">Auto-detect from Key (Recommended)</SelectItem>
-                <SelectItem value="gemini">Google Gemini (Recommended - Fast & Free)</SelectItem>
-                <SelectItem value="openai">OpenAI (GPT-4o)</SelectItem>
-                <SelectItem value="openrouter">OpenRouter</SelectItem>
-                <SelectItem value="groq">Groq</SelectItem>
-              </SelectContent>
-            </Select>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label className="text-xs">AI Provider</Label>
+              <Select value={selectedProvider} onValueChange={handleProviderChange}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select provider" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">Auto-detect from Key</SelectItem>
+                  <SelectItem value="gemini">Google Gemini (Recommended)</SelectItem>
+                  <SelectItem value="openai">OpenAI</SelectItem>
+                  <SelectItem value="openrouter">OpenRouter</SelectItem>
+                  <SelectItem value="groq">Groq</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs">Model Name</Label>
+              <Input
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value)}
+                placeholder="e.g. gemini-3.8-flash"
+                className="text-xs font-mono"
+              />
+            </div>
           </div>
 
           <div className="space-y-1.5">

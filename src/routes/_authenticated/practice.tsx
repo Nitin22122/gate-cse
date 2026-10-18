@@ -491,7 +491,7 @@ function AiEntry() {
   const qc = useQueryClient();
   const profile = useQuery({ queryKey: ["profile"], queryFn: fetchProfile });
   const format = useServerFn(formatQuestionsWithAI);
-  const { apiKey, provider } = useAiConfig();
+  const { apiKey, provider, modelName } = useAiConfig();
 
   const [defaultSubject, setDefaultSubject] = useState<string>(PRACTICE_SUBJECTS[0]);
   const [tag, setTag] = useState<string>("Untagged");
@@ -506,6 +506,7 @@ function AiEntry() {
           defaultSubject,
           apiKey: apiKey || null,
           provider: provider || null,
+          modelName: modelName || null,
         },
       });
       return res.questions;

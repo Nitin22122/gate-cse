@@ -19,6 +19,7 @@ export const formatQuestionsWithAI = createServerFn({ method: "POST" })
       defaultSubject?: string;
       apiKey?: string | null;
       provider?: string | null;
+      modelName?: string | null;
     }) => {
       if (!input || typeof input.rawText !== "string" || input.rawText.trim().length < 10) {
         throw new Error("Paste your question text first");
@@ -28,6 +29,7 @@ export const formatQuestionsWithAI = createServerFn({ method: "POST" })
         defaultSubject: input.defaultSubject ?? "",
         apiKey: input.apiKey ?? null,
         provider: input.provider ?? null,
+        modelName: input.modelName ?? null,
       };
     },
   )
@@ -35,6 +37,7 @@ export const formatQuestionsWithAI = createServerFn({ method: "POST" })
     const { model, isLovableGateway } = await getAiModel({
       apiKey: data.apiKey,
       provider: data.provider,
+      modelName: data.modelName,
     });
 
     const system = [
